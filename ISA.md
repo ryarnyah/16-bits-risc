@@ -85,7 +85,7 @@ The 6‑bit immediate is **sign‑extended** to 16 bits before the operation.
 
 - `LD Rd, [Rs + off]` : `Rd = M[ Rs + sext(off) ]`
 - `ST Rd, [Rs + off]` : `M[ Rs + sext(off) ] = Rd`
-- Address must be word‑aligned (even). The offset is in **bytes**, range –64 to +62.
+- Address must be word‑aligned (even). The offset is in **bytes**, range –32 to +31.
 
 ---
 
@@ -261,7 +261,7 @@ The 4‑bit opcode is decoded as follows:
 
 ```
 wire [3:0] op = inst[15:12];
-wire is_alu = ~op[3];               // opcodes 0x0..0x8
+wire is_alu = ~op[3] | (op == 4'b1000); // opcodes 0x0..0x8
 
 // ALU function = op[2:0]  (except for ADD/ADDI where op[2:0]=000, XOR/XORI where=001)
 wire [2:0] alu_func = is_alu ? op[2:0] : 3'b0;
