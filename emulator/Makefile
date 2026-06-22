@@ -1,24 +1,21 @@
-CORE_DIR = $(abspath ../target/gen)
-BUILD_DIR = ./build
-VCORE_SV = $(CORE_DIR)/Core.sv
-VCORE_CPP = $(BUILD_DIR)/VCore.cpp
-VCORE_H = $(BUILD_DIR)/VCore.h
-VERILATOR = verilator
+CORE_DIR   = $(abspath ../target/gen)
+BUILD_DIR  = $(abspath ./build)
+EMULATOR   = $(BUILD_DIR)/obj_dir/emulator
+VCORE_SV   = $(CORE_DIR)/Core.sv
+MAIN_CPP   = $(abspath ./main.cpp)
+VERILATOR  = verilator
 VERILATOR_FLAGS = --cc --trace -Wall -Wno-DECLFILENAME -Wno-UNUSED -Wno-UNOPTFLAT -Wno-WIDTH -Wno-CASEINCOMPLETE -Wno-PINCONNECTEMPTY -CFLAGS "-std=c++17 -O2" --top-module Core
 
-all: $(BUILD_DIR)/emulator
+all: $(EMULATOR)
 
 $(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+	mkdir -p $(BUILD_DIR)/obj_dir
 
-$(VCORE_CPP) $(VCORE_H): $(VCORE_SV) | $(BUILD_DIR)
-	cd $(BUILD_DIR) && $(VERILATOR) $(VERILATOR_FLAGS) $(VCORE_SV)
+$(EMULATOR): $(VCORE_SV) main.cpp | $(BUILD_DIR)
+	cd $(BUILD_DIR) && $(VERILATOR) $(VERILATOR_FLAGS) --build --exe $(VCORE_SV) $(MAIN_CPP) -o emulator
 
-$(BUILD_DIR)/emulator: $(VCORE_CPP) $(VCORE_H) main.cpp | $(BUILD_DIR)
-	cd $(BUILD_DIR) && $(MAKE) -f VCore.mk
-
-run: $(BUILD_DIR)/emulator
-	$(BUILD_DIR)/emulator
+run: $(EMULATOR)
+	$(EMULATOR) $(PROG)
 
 clean:
 	rm -rf $(BUILD_DIR)

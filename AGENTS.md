@@ -10,7 +10,8 @@
 - [x] Component decomposition (RegFile, ALU, Decoder, BusInterface) — individually verified
 - [x] Core refactored to use sub-components (RegFile, ALU, Decoder, BusInterface) — compiles, generates Verilog
 - [x] LD bug fix: write `dataLoad` to register file instead of stale `aluRes`
-- [x] Emulator (emulator/main.cpp) — Verilator compiles VCore, emulator binary TBD
+- [x] Emulator (emulator/main.cpp) — Verilator compiles VCore, emulator binary works
+- [x] Emulator end-to-end test: counter.asm loads and loops correctly (R3 1..9, BLT branch, reset to 0)
 
 ### Design Decisions
 
@@ -44,8 +45,24 @@
    - Core now instantiates RegFile, ALU, Decoder, BusInterface as sub-components
    - Redundant inline logic removed; formal assertions focus on FSM/pipeline integration
 
+6. **cmdStrb registered** (BusInterface.scala):
+   - Changed from combinational (same cycle as 4th byte) to registered
+   - Ensures `cmdWord` has the full assembled 4-byte value when cmdStrb fires
+   - TC-BI-3/TC-BI-5 updated for new timing
+
+7. **Core formal reset guard** (Core.scala):
+   - Added `resetn` guard to all temporal assertions
+   - Hardware reset overrides pipeline registers — assertions must be skipped when `resetn=0`
+   - Without this guard, BMC found counterexample at step 20 (reset fires while past state was WRITEBACK)
+
+8. **Emulator rewritten** (emulator/main.cpp, emulator/Makefile):
+   - Uses Verilator 5 `--build --exe` for single-step compilation
+   - Uses clean Verilog port names (no more `_zz_` mangling)
+   - Supports `s [n]` for multi-step; shows PC after each step
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully
-- **Formal Verification**: ✓ BMC(50) passes (SpinalFormalConfig)
+- **Formal Verification**: ✓ All 5 components pass at BMC(30): Core, ALU, Decoder, RegFile, BusInterface
 - **Verilator Emulator**: ✓ Compiles and runs, responds to bus commands (LOAD_ADDR, LOAD_DATA, STEP, RUN, READ_REG, READ_MEM, READ_PC)
+- **End-to-end counter program**: ✓ counter.asm loads, loops, counts R3 1..9, BLT branch, resets to 0

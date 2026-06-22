@@ -18,16 +18,6 @@ class Emulator {
     VerilatedVcdC* tfp;
     u64 cycle;
 
-    // Verilator mangled signal names from SpinalHDL Core
-    // _zz_2 = bus.cmd.valid (in)
-    // _zz_3 = bus.cmd.ready (out)
-    // _zz_switch_Core_l135 = bus.cmd.payload (in, 8 bits)
-    // _zz_4 = bus.rsp.valid (out)
-    // _zz_6 = bus.rsp.payload (out, 8 bits)
-    // _zz_5 = bus.rsp.ready (in)
-    // _zz_7 = bus.ack (out)
-    // resetn = resetn (in)
-
 public:
     Emulator() : core(new VCore), tfp(nullptr), cycle(0) {
         Verilated::traceEverOn(true);
@@ -46,9 +36,9 @@ public:
     void reset() {
         core->clk = 0;
         core->resetn = 0;
-        core->_zz_2 = 0;        // bus_cmd_valid
-        core->_zz_switch_Core_l135 = 0;  // bus_cmd_payload
-        core->_zz_5 = 0;        // bus_rsp_ready
+        core->io_bus_cmd_valid = 0;
+        core->io_bus_cmd_payload = 0;
+        core->io_bus_rsp_ready = 0;
         for (int i = 0; i < 10; i++) tick();
         core->resetn = 1;
         for (int i = 0; i < 10; i++) tick();
@@ -74,19 +64,19 @@ public:
         };
 
         for (int i = 0; i < 4; i++) {
-            core->_zz_2 = 1;                        // bus_cmd_valid
-            core->_zz_switch_Core_l135 = bytes[i];  // bus_cmd_payload
+            core->io_bus_cmd_valid = 1;
+            core->io_bus_cmd_payload = bytes[i];
             tick();
-            while (!core->_zz_3) tick();            // wait for bus_cmd_ready
+            while (!core->io_bus_cmd_ready) tick();
         }
-        core->_zz_2 = 0;
+        core->io_bus_cmd_valid = 0;
         tick();
     }
 
     void waitAck() {
         tick();
         int tries = 0;
-        while (!core->_zz_7 && tries < 1000) {      // wait for bus_ack
+        while (!core->io_bus_ack && tries < 1000) {
             tick();
             tries++;
         }
@@ -97,14 +87,14 @@ public:
         u32 result = 0;
         for (int i = 0; i < 4; i++) {
             int tries = 0;
-            while (!core->_zz_4 && tries < 1000) {  // wait for bus_rsp_valid
+            while (!core->io_bus_rsp_valid && tries < 1000) {
                 tick();
                 tries++;
             }
-            u8 byte = core->_zz_6 & 0xFF;           // bus_rsp_payload
-            core->_zz_5 = 1;                        // bus_rsp_ready
+            u8 byte = core->io_bus_rsp_payload & 0xFF;
+            core->io_bus_rsp_ready = 1;
             tick();
-            core->_zz_5 = 0;
+            core->io_bus_rsp_ready = 0;
             result = (result << 8) | byte;
         }
         return result;
@@ -166,11 +156,17 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "RISC Core Emulator ready. Commands:\n"
-              << "  s        - step\n"
+              << "  s [n]    - step n times (default 1), show PC after each\n"
               << "  r [n]    - read register n (default 0)\n"
               << "  m [addr] - read memory at addr (default 0)\n"
               << "  p        - read PC\n"
               << "  q        - quit\n";
+
+    auto parseArg = [](const std::string& line, int defaultVal) -> int {
+        auto pos = line.find_first_of(" \t");
+        if (pos == std::string::npos) return defaultVal;
+        return std::stoi(line.substr(pos + 1));
+    };
 
     std::string line;
     while (true) {
@@ -180,19 +176,28 @@ int main(int argc, char** argv) {
 
         char cmd = line[0];
         if (cmd == 'q') break;
-        else if (cmd == 's') { emu.step(); std::cout << "Stepped\n"; }
+        else if (cmd == 's') {
+            int n = parseArg(line, 1);
+            for (int i = 0; i < n; i++) {
+                emu.step();
+                if (n > 1) std::cout << "  PC=" << std::hex << emu.readPC() << std::dec << " ";
+            }
+            if (n == 1) std::cout << "PC=" << std::hex << emu.readPC() << std::dec << " ";
+            std::cout << "R3=" << std::hex << emu.readReg(3) << std::dec << "\n";
+        }
         else if (cmd == 'r') {
-            int reg = 0;
-            if (line.size() > 2) reg = std::stoi(line.substr(2));
+            int reg = parseArg(line, 0);
             std::cout << "R" << reg << " = 0x" << std::hex << emu.readReg(reg) << std::dec << "\n";
         }
         else if (cmd == 'm') {
-            u16 addr = 0;
-            if (line.size() > 2) addr = std::stoul(line.substr(2), nullptr, 16);
+            u16 addr = u16(parseArg(line, 0));
+            if (line.size() > 2 && line.substr(2, 2) == "0x")
+                addr = u16(std::stoul(line.substr(2), nullptr, 16));
             std::cout << "mem[0x" << std::hex << addr << "] = 0x" << emu.readMem(addr) << std::dec << "\n";
         }
         else if (cmd == 'p') {
-            std::cout << "PC = 0x" << std::hex << emu.readPC() << std::dec << "\n";
+            std::cout << "PC = 0x" << std::hex << emu.readPC() << std::dec
+                      << "  R3 = 0x" << emu.readReg(3) << std::dec << "\n";
         }
         else {
             std::cout << "Unknown command\n";

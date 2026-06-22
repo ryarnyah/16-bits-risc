@@ -101,10 +101,10 @@ case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBu
   // ST:                     store source in rdField instr[11:9]     (ISA §3.3)
   // All others:             Rs in instr[8:6],  Rt in instr[5:3]
   private val rsAddr = ((decoder.io.isBranch || decoder.io.isJMP) ?
-    decoder.io.instr(11 downto 9) | decoder.io.rsReg).asUInt
+    decoder.io.instr(11 downto 9).asBits | decoder.io.rsReg.asBits).asUInt
   private val rtAddr = (decoder.io.isST ?
-    decoder.io.rdField |
-    (decoder.io.isBranch ? decoder.io.instr(8 downto 6) | decoder.io.rtReg)).asBits.asUInt
+    decoder.io.rdField.asBits |
+    (decoder.io.isBranch ? decoder.io.instr(8 downto 6).asBits | decoder.io.rtReg.asBits)).asUInt
 
   regFile.io.rsAddr := rsAddr
   regFile.io.rtAddr := rtAddr
