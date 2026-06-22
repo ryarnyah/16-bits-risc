@@ -102,7 +102,7 @@ import scala.language.postfixOps
 | Signal (`Bool`, `Bits`, etc)| camelCase               | `stretchClk`, `syncSignal`   |
 | Constant                    | camelCase               | `masterKey`                  |
 
-### 2.3 `Bundle` and `Component`
+### 2.3 `Bundle`, `SpinalEnum` and `Component`
 
 **Always use `case class` for automatic cloning during signal duplication:**
 
@@ -116,6 +116,17 @@ case class MyBundle() extends Bundle {
 // case class enables easy instantiation in different contexts
 case class MyCore() extends Component with MyBusIoComponent {
   val io: MyCoreBundle = MyCoreBundle()
+}
+
+// SpinalEnum: The Enumeration type corresponds to a list of named values.
+object MyEnumStatic extends SpinalEnum {
+  val e0, e1, e2, e3 = newElement()
+  // staticEncoding permit to define enum value
+  defaultEncoding = SpinalEnumEncoding("staticEncoding")(
+    e0 -> 0x00,
+    e1 -> 0x02,
+    e2 -> 0x03,
+    e3 -> 0x04)
 }
 ```
 
