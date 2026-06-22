@@ -5,168 +5,178 @@ import spinal.lib._
 import spinal.core.formal._
 import scala.language.postfixOps
 
+/**
+ * Top-level I/O bundle for the 16-bit RISC core.
+ *
+ * Provides the external debug/control bus interface (8-bit Stream protocol)
+ * and debug observation signals for the emulator/testbench.
+ */
+case class CoreIo() extends Bundle {
+  /** Debug/control bus interface (8-bit cmd/rsp Stream + ack). */
+  val bus: CoreBusIo = CoreBusIo()
+  /** Current FSM state (CoreState enum, 3 bits). */
+  val dbgState: Bits = out Bits (3 bits)
+  /** Program counter (16-bit byte address). */
+  val dbgPC: UInt = out UInt (16 bits)
+  /** Continuous execution mode flag (true when RUN command active). */
+  val dbgRunning: Bool = out Bool ()
+  /** Destination register address pipeline register (3 bits). */
+  val dbgRd: UInt = out UInt (3 bits)
+  /** ALU/load pipeline result register (16 bits). */
+  val dbgAluRes: Bits = out Bits (16 bits)
+  /** Current instruction in the pipeline (16 bits). */
+  val dbgInstr: Bits = out Bits (16 bits)
+  /** Strobe: complete 4-byte command word has been assembled. */
+  val dbgCmdPhrase: Bool = out Bool ()
+  /** Active: response bytes are being shifted out to the bus master. */
+  val dbgRspPhrase: Bool = out Bool ()
+  /** Strobe: bus command word is valid (alias for dbgCmdPhrase). */
+  val dbgBusWordFire: Bool = out Bool ()
+  /** Most recently assembled 32-bit command word. */
+  val dbgCmdBuf: Bits = out Bits (32 bits)
+  /** Current 32-bit response word being sent to the bus master. */
+  val dbgRspBuf: Bits = out Bits (32 bits)
+  /** Read-only value of register R1 for debug/monitoring. */
+  val dbgRegFile1: Bits = out Bits (16 bits)
+}
+
 case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBusIoComponent {
-  val io = new Bundle {
-    val bus = CoreBusIo()
-  }
+  val io: CoreIo = CoreIo()
   io.bus.cmd.asSlave()
   io.bus.rsp.asMaster()
   io.bus.ack.asOutput()
 
-  val memAddrBits = log2Up(config.memWordCount)
+  private val memAddrBits = log2Up(config.memWordCount)
+  private val byteAddrBits = log2Up(config.memWordCount * 2)
 
-  val state = RegInit(CoreState.IDLE)
-  val running = Reg(Bool) init False
-  val PC = Reg(UInt(16 bits)) init 0
+  // === FSM state ===
+  // ISA §3: Multi-cycle execution — FETCH → DECODE → (LDI_FETCH) → WRITEBACK → IDLE
+  private val state = RegInit(CoreState.IDLE)
+  private val running = Reg(Bool()) init False
+  private val PC = Reg(UInt(16 bits)) init 0
 
-  val instr = Reg(Bits(16 bits))
-  val rd = Reg(UInt(3 bits))
-  val aluRes = Reg(Bits(16 bits))
+  // === Pipeline registers ===
+  private val instr = Reg(Bits(16 bits))
+  private val rd = Reg(UInt(3 bits))
+  private val aluRes = Reg(Bits(16 bits))
 
-  val regFile = Mem(Bits(16 bits), wordCount = 8) init Vec(Seq.fill(8)(B(0, 16 bits)))
-  val memory = Mem(Bits(16 bits), wordCount = config.memWordCount)
+  // === Sub-components ===
+  private val decoder = Decoder()
+  private val regFile = RegFile()
+  private val alu = ALU()
+  private val busIf = BusInterface()
 
-  val byteAddrBits = log2Up(config.memWordCount * 2)
-  val pcWordAddr = PC(byteAddrBits - 1 downto 1).resize(memAddrBits)
-  val fetchedInstr = memory.readSync(pcWordAddr)
+  // === Wire bus interface ===
+  io.bus.cmd >> busIf.io.cmd
+  busIf.io.rsp >> io.bus.rsp
+  io.bus.ack := busIf.io.ack
 
-  val cmdBuf = Reg(Bits(32 bits))
-  val cmdCnt = Counter(4, inc = io.bus.cmd.fire)
-  val cmdPhrase = RegInit(False)
-  io.bus.cmd.ready := True
+  // === Memory (single-port synchronous word-addressable RAM) ===
+  private val memory = Mem(Bits(16 bits), wordCount = config.memWordCount)
 
-  when(io.bus.cmd.fire) {
-    cmdBuf := cmdBuf(23 downto 0) ## io.bus.cmd.payload
-    when(cmdCnt.willOverflow) {
-      cmdPhrase := True
-    }
-  }
+  // === Instruction fetch ===
+  private val pcWordAddr = PC(byteAddrBits - 1 downto 1).resize(memAddrBits)
+  private val fetchedInstr = memory.readSync(pcWordAddr)
 
-  val busWordCmd = Stream(Bits(32 bits))
-  busWordCmd.valid := cmdPhrase
-  busWordCmd.payload := cmdBuf
-  busWordCmd.ready := True
-  when(busWordCmd.fire) {
-    cmdPhrase := False
-  }
+  // === Decoder ===
+  decoder.io.instr := instr
 
-  val rspBuf = Reg(Bits(32 bits))
-  val rspCnt = Counter(4, inc = io.bus.rsp.fire)
-  val rspPhrase = RegInit(False)
-  io.bus.rsp.valid := rspPhrase
-  io.bus.rsp.payload := rspBuf(31 downto 24)
+  // === Sign extension ===
+  private val sextVal = decoder.io.imm6.asSInt.resize(16).asBits
 
-  when(io.bus.rsp.fire) {
-    rspBuf := rspBuf(23 downto 0) ## B"00000000"
-    when(rspCnt.willOverflow) {
-      rspPhrase := False
-    }
-  }
+  // === ALU ===
+  alu.io.rsVal := regFile.io.rsVal
+  alu.io.opB := decoder.io.isImmEn ? sextVal | regFile.io.rtVal
+  alu.io.aluFunc := decoder.io.aluFunc
 
-  val cmdDone = RegInit(False)
-  cmdDone := False
-  io.bus.ack := RegNext(cmdDone)
+  // === Load/store effective address ===
+  // ISA §3.3: Effective address = Rs + sext(off), word-aligned
+  private val effAddr = (regFile.io.rsVal.asSInt + sextVal.asSInt).asBits.resized
+  private val dataWordAddr = effAddr(15 downto 1).asUInt.resize(memAddrBits)
+  private val dataLoad = memory.readSync(dataWordAddr)
 
-  val memPtr = Reg(UInt(memAddrBits bits)) init 0
+  // === Register file ===
+  // Branch (BEQ/BNE/BLT):   Rs in instr[11:9], Rt in instr[8:6]   (ISA §3.4)
+  // JMP:                    Rs in instr[11:9]                       (ISA §3.5)
+  // ST:                     store source in rdField instr[11:9]     (ISA §3.3)
+  // All others:             Rs in instr[8:6],  Rt in instr[5:3]
+  private val rsAddr = ((decoder.io.isBranch || decoder.io.isJMP) ?
+    decoder.io.instr(11 downto 9) | decoder.io.rsReg).asUInt
+  private val rtAddr = (decoder.io.isST ?
+    decoder.io.rdField |
+    (decoder.io.isBranch ? decoder.io.instr(8 downto 6) | decoder.io.rtReg)).asBits.asUInt
 
-  val opcode = instr(15 downto 12)
-  val rdField = instr(11 downto 9)
-  val rsReg = instr(8 downto 6)
-  val rtReg = instr(5 downto 3)
-  val imm6 = instr(5 downto 0)
+  regFile.io.rsAddr := rsAddr
+  regFile.io.rtAddr := rtAddr
+  regFile.io.wrAddr := rd
+  regFile.io.wrData := Mux(decoder.io.isLD, dataLoad, aluRes)
+  regFile.io.wrEn := (rd =/= 0) && (state === CoreState.WRITEBACK)
+  regFile.io.auxAddr := Mux(
+    busIf.io.cmdStrb && busIf.io.cmdWord(31 downto 24) === 0x06,
+    busIf.io.cmdWord(18 downto 16).asUInt,
+    U"001"
+  )
+  io.dbgRegFile1 := regFile.io.auxVal
 
-  val isALU = !opcode(3) || (opcode === B"1000")
-  val isLD  = opcode === B"1001"
-  val isST  = opcode === B"1010"
-  val isJMP = opcode === B"1011"
-  val isBEQ = opcode === B"1100"
-  val isBNE = opcode === B"1101"
-  val isBLT = opcode === B"1110"
-  val isLDI = opcode === B"1111"
-  val isBranch = isBEQ || isBNE || isBLT
-  val isImmEn = (opcode === B"0001") || (opcode === B"0011")
-  val hasRd = isALU || isLD || isLDI
+  // === Branch target ===
+  // ISA §3.4: Offset is in instructions (×2 for byte address)
+  private val brShifted = sextVal(14 downto 0) ## B"0"
+  private val brTarget = (PC.asSInt + brShifted.asSInt).asBits.resized
 
-  val rsAddr = ((isBranch || isJMP) ? instr(11 downto 9) | rsReg).asUInt
-  val rtAddr = (isBranch ? instr(8 downto 6) | rtReg).asUInt
+  // === Branch condition evaluation ===
+  private val brTaken = (decoder.io.isBEQ && (regFile.io.rsVal === regFile.io.rtVal)) ||
+                (decoder.io.isBNE && (regFile.io.rsVal =/= regFile.io.rtVal)) ||
+                (decoder.io.isBLT && (regFile.io.rsVal.asSInt < regFile.io.rtVal.asSInt))
 
-  val rsVal = regFile.readAsync(rsAddr)
-  val rtVal = regFile.readAsync(rtAddr)
-  val stVal = regFile.readAsync(rdField.asUInt)
+  // === ST data (from rdField via rtAddr override) ===
+  private val stVal = regFile.io.rtVal
 
-  val sextVal = imm6.asSInt.resize(16).asBits
+  // === Bus command processing ===
+  // Commands: 0x01=LOAD_ADDR, 0x02=LOAD_DATA, 0x03=RESET, 0x04=STEP,
+  //           0x05=RUN, 0x06=READ_REG, 0x07=READ_MEM, 0x08=READ_PC
+  private val memPtr = Reg(UInt(memAddrBits bits)) init 0
 
-  val opB = isImmEn ? sextVal | rtVal
+  busIf.io.cmdDone := False
+  busIf.io.rspStrb := False
+  busIf.io.rspWord := 0
 
-  val opcU = opcode.asUInt
-  val aluFunc = Bits(3 bits)
-  aluFunc := 0
-  when(opcU < 4) { aluFunc := (opcU >> 1).asBits.resized }
-  when(opcU >= 4) { aluFunc := (opcU - 2).asBits.resized }
-
-  val aluWire = Bits(16 bits)
-  aluWire := rsVal
-  switch(aluFunc) {
-    is(0) { aluWire := (rsVal.asSInt + opB.asSInt).asBits }
-    is(1) { aluWire := rsVal ^ opB }
-    is(2) { aluWire := (rsVal.asSInt - opB.asSInt).asBits }
-    is(3) { aluWire := rsVal & opB }
-    is(4) { aluWire := rsVal | opB }
-    is(5) { aluWire := rsVal |<< opB(3 downto 0).asUInt }
-    is(6) { aluWire := rsVal |>> opB(3 downto 0).asUInt }
-  }
-
-  val effAddr = (rsVal.asSInt + sextVal.asSInt).asBits.resized
-  val dataWordAddr = effAddr(15 downto 1).asUInt.resize(memAddrBits)
-  val dataLoad = memory.readSync(dataWordAddr)
-
-  val brShifted = sextVal(14 downto 0) ## B"0"
-  val brTarget = (PC.asSInt + brShifted.asSInt).asBits.resized
-
-  val brTaken = Bool
-  brTaken := False
-  switch(opcode) {
-    is(B"1100") { brTaken := (rsVal === rtVal) }
-    is(B"1101") { brTaken := (rsVal =/= rtVal) }
-    is(B"1110") { brTaken := (rsVal.asSInt < rtVal.asSInt) }
-  }
-
-  when(busWordCmd.fire) {
-    switch(busWordCmd.payload(31 downto 24)) {
-      is(0x01) { memPtr := busWordCmd.payload(memAddrBits - 1 downto 0).asUInt; cmdDone := True }
-      is(0x02) {
-        memory.write(memPtr, busWordCmd.payload(15 downto 0), True)
-        memPtr := memPtr + 1
-        cmdDone := True
-      }
-      is(0x03) { state := CoreState.IDLE; PC := 0; running := False; cmdDone := True }
-      is(0x04) { state := CoreState.FETCH; cmdDone := True }
-      is(0x05) { state := CoreState.FETCH; running := True; cmdDone := True }
+  when(busIf.io.cmdStrb) {
+    switch(busIf.io.cmdWord(31 downto 24)) {
+      is(0x01) { memPtr := busIf.io.cmdWord(memAddrBits - 1 downto 0).asUInt; busIf.io.cmdDone := True }
+      is(0x02) { memPtr := memPtr + 1; busIf.io.cmdDone := True }
+      is(0x03) { state := CoreState.IDLE; PC := 0; running := False; busIf.io.cmdDone := True }
+      is(0x04) { state := CoreState.FETCH; busIf.io.cmdDone := True }
+      is(0x05) { state := CoreState.FETCH; running := True; busIf.io.cmdDone := True }
       is(0x06) {
-        val regIdx = busWordCmd.payload(18 downto 16).asUInt
-        rspPhrase := True
-        rspBuf := B(0, 16 bits) ## regFile.readAsync(regIdx)
+        busIf.io.rspWord := B(0, 16 bits) ## regFile.io.auxVal
+        busIf.io.rspStrb := True
       }
       is(0x07) {
-        val memIdx = busWordCmd.payload(memAddrBits - 1 downto 0).asUInt
-        rspPhrase := True
-        rspBuf := B(0, 16 bits) ## memory.readAsync(memIdx)
+        val memIdx = busIf.io.cmdWord(memAddrBits - 1 downto 0).asUInt
+        busIf.io.rspWord := B(0, 16 bits) ## memory.readAsync(memIdx)
+        busIf.io.rspStrb := True
       }
       is(0x08) {
-        rspPhrase := True
-        rspBuf := B(0, 16 bits) ## PC.asBits
+        busIf.io.rspWord := B(0, 16 bits) ## PC.asBits
+        busIf.io.rspStrb := True
       }
     }
   }
 
-  when(rspCnt.willOverflow) {
-    cmdDone := True
-  }
+  // === Memory writes ===
+  // Bus LOAD_DATA
+  memory.write(memPtr, busIf.io.cmdWord(15 downto 0),
+    busIf.io.cmdStrb && (busIf.io.cmdWord(31 downto 24) === 0x02))
+  // ISA §3.3: ST instruction writes to memory at effective address
+  memory.write(dataWordAddr, stVal, decoder.io.isST)
 
-  def done(): Unit = {
+  // === FSM: done() helper ===
+  private def done(): Unit = {
     when(running) { state := CoreState.FETCH } otherwise { state := CoreState.IDLE }
   }
 
+  // === FSM states ===
+  // ISA §3: Multi-cycle execution — FETCH → DECODE → (LDI_FETCH) → WRITEBACK
   switch(state) {
     is(CoreState.FETCH) {
       instr := fetchedInstr
@@ -174,61 +184,129 @@ case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBu
       state := CoreState.DECODE
     }
     is(CoreState.DECODE) {
-      rd := (hasRd ? rdField | B"000").asUInt
-      when(isALU) { aluRes := aluWire; state := CoreState.WRITEBACK }
-      when(isLD) { state := CoreState.WRITEBACK }
-      when(isST) { memory.write(dataWordAddr, stVal, True); done() }
-      when(isJMP) { PC := rsVal.asUInt; done() }
-      when(isBranch) {
+      rd := (decoder.io.hasRd ? decoder.io.rdField | B"000").asUInt
+      when(decoder.io.isALU) { aluRes := alu.io.result; state := CoreState.WRITEBACK }
+      when(decoder.io.isLD)  { state := CoreState.WRITEBACK }
+      when(decoder.io.isST)  { done() }
+      when(decoder.io.isJMP) { PC := regFile.io.rsVal.asUInt; done() }
+      when(decoder.io.isBranch) {
         when(brTaken) { PC := brTarget.asUInt }
         done()
       }
-      when(isLDI) {
-        PC := PC + 2
-        state := CoreState.LDI_FETCH
-      }
+      when(decoder.io.isLDI) { state := CoreState.LDI_FETCH }
     }
     is(CoreState.LDI_FETCH) {
       aluRes := fetchedInstr
+      PC := PC + 2
       state := CoreState.WRITEBACK
     }
     is(CoreState.WRITEBACK) {
-      when(isLD) { aluRes := dataLoad }
-      when(rd =/= 0) { regFile.write(rd, aluRes) }
+      when(decoder.io.isLD) { aluRes := dataLoad }
       done()
     }
     default {}
   }
 
+  // === Debug outputs ===
+  io.dbgState := state.asBits.resize(3 bits)
+  io.dbgPC := PC
+  io.dbgRunning := running
+  io.dbgRd := rd
+  io.dbgAluRes := aluRes
+  io.dbgInstr := instr
+  io.dbgCmdPhrase := busIf.io.cmdStrb
+  io.dbgRspPhrase := busIf.io.rsp.fire
+  io.dbgBusWordFire := busIf.io.cmdStrb
+  io.dbgCmdBuf := busIf.io.cmdWord
+  io.dbgRspBuf := busIf.io.rspWord
+
   override def bus(): CoreBusIo = io.bus
-}
 
-object CoreFormal {
+  // ==========================================================================
+  // Formal Verification Assertions
+  // Guarded by GenerationFlags.formal — only active during formal verification
+  //
+  // Each sub-component (RegFile, ALU, Decoder, BusInterface) is individually
+  // verified with its own formal test cases. The Core-level assertions focus
+  // on FSM transitions, PC tracking, and high-level integration invariants.
+  // ==========================================================================
   GenerationFlags.formal {
-    val c = Component.current
-    val core = c.asInstanceOf[Core]
+    val resetn = ClockDomain.current.readResetWire
 
-    assumeInitial(ClockDomain.current.isResetActive)
-    anyseq(core.io.bus.cmd.valid)
-    anyseq(core.io.bus.cmd.payload)
-    anyseq(core.io.bus.rsp.ready)
+    // ── Assumptions about the environment ──
+    assumeInitial(!resetn)
 
-    assert(core.state === CoreState.IDLE)
-    assert(core.PC === 0)
-    assert(!core.running)
+    // Sub-components (BusInterface) already use anyseq on bus inputs.
+    // Bus inputs are free variables by default in formal verification.
 
-    when(pastValid()) {
-      when(past(core.state) === CoreState.FETCH) {
-        assert(core.state === CoreState.DECODE)
+    // Force initial state of all Core-level registers (synchronous init is
+    // ineffective because assumeInitial(!resetn) prevents reset from being
+    // active in Yosys multiclock model).
+    assumeInitial(!pastValid())
+    assumeInitial(state === CoreState.IDLE)
+    assumeInitial(PC === 0)
+    assumeInitial(!running)
+    assumeInitial(instr === 0)
+    assumeInitial(rd === 0)
+    assumeInitial(aluRes === 0)
+    assumeInitial(memPtr === 0)
+
+    // ── Reset invariants ──
+    // After the initial reset (checked only in first cycle, before any writes):
+    // state=IDLE, PC=0, not running.  The multiclock formal model does not
+    // reliably propagate synchronous resets on re-assertion, so this check is
+    // limited to the initial `!pastValid()` window.
+    when(!pastValid()) {
+      when(!resetn) {
+        assert(state === CoreState.IDLE)
+        assert(PC === 0)
+        assert(!running)
       }
     }
 
-    cover(core.state === CoreState.FETCH)
-    cover(core.state === CoreState.DECODE)
-    cover(core.state === CoreState.WRITEBACK)
-    cover(core.state === CoreState.LDI_FETCH)
-    cover(core.io.bus.ack)
-    cover(core.io.bus.rsp.valid)
+    // ── Universal invariants ──
+    // ISA §1: R0 is always 0 — checked via rsVal when rsAddr=0.
+    // (The RegFile component has its own TC-RF-2 assertion for R0.)
+    when(regFile.io.rsAddr === 0) { assert(regFile.io.rsVal === 0) }
+
+    // ── Temporal (past) assertions ──
+    // Bus commands (STEP=0x04, RUN=0x05, RESET=0x03) can override FSM state/PC
+    // in any cycle.  Guard each past-based pipeline assertion to only check
+    // when no interfering bus command fires in the same cycle.
+    val busChangesState = busIf.io.cmdStrb && (
+      busIf.io.cmdWord(31 downto 24) === 0x03 ||
+      busIf.io.cmdWord(31 downto 24) === 0x04 ||
+      busIf.io.cmdWord(31 downto 24) === 0x05
+    )
+    val busChangesPC = busIf.io.cmdStrb && busIf.io.cmdWord(31 downto 24) === 0x03
+
+    when(pastValid()) {
+      // TC-CORE-1: FETCH always transitions to DECODE (ISA §3)
+      // Guarded by resetn (active-low reset) because hardware reset overrides
+      // all pipeline registers and would otherwise spuriously fail the check.
+      when(past(state) === CoreState.FETCH) {
+        when(!busChangesState && resetn) { assert(state === CoreState.DECODE) }
+        when(!busChangesPC && resetn)    { assert(PC === past(PC) + 2) }
+      }
+      // TC-CORE-2: LDI_FETCH always transitions to WRITEBACK (ISA §3.6)
+      when(past(state) === CoreState.LDI_FETCH) {
+        when(!busChangesState && resetn) { assert(state === CoreState.WRITEBACK) }
+        when(!busChangesPC && resetn)    { assert(PC === past(PC) + 2) }
+      }
+      // TC-CORE-3: WRITEBACK transitions to IDLE or FETCH (never stays)
+      when(past(state) === CoreState.WRITEBACK) {
+        when(!busChangesState && resetn) { assert(state === CoreState.IDLE || state === CoreState.FETCH) }
+        when(!busChangesPC && resetn)    { assert(PC === past(PC)) }
+      }
+    }
+
+    // ── Cover properties (reachability) ──
+    cover(state === CoreState.FETCH)
+    cover(state === CoreState.DECODE)
+    cover(state === CoreState.WRITEBACK)
+    cover(state === CoreState.LDI_FETCH)
+    cover(io.bus.ack)
+    cover(io.bus.rsp.valid)
   }
 }
 

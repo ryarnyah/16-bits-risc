@@ -5,11 +5,7 @@ import spinal.lib._
 import scala.language.postfixOps
 
 object CoreState extends SpinalEnum {
-  val IDLE, FETCH, DECODE, EXECUTE, LDI_FETCH, WRITEBACK = newElement()
-}
-
-object ALUOp extends SpinalEnum {
-  val ADD, SUB, AND, OR, XOR, SLL, SRL = newElement()
+  val IDLE, FETCH, DECODE, LDI_FETCH, WRITEBACK = newElement()
 }
 
 case class CoreConfig(memWordCount: Int = 4096) {
@@ -30,8 +26,4 @@ case class CoreBusIo() extends Bundle with IMasterSlave {
 
 trait CoreBusIoComponent {
   def bus(): CoreBusIo
-}
-
-case class CoreBundle() extends Bundle {
-  val bus = CoreBusIo()
 }

@@ -7,10 +7,10 @@
 - [x] ISA analysis — two errors found and fixed
 - [x] Project structure (build.sbt, directories)
 - [x] Core types & enums (Opcodes, ALUOp, CoreState, Bus)
-- [x] Core implementation (RegisterFile, ALU, Decode, FSM)
-- [x] Unit tests (CoreTest.scala) — compiles, execution fix needed
-- [x] Formal tests (CoreFormalTest.scala) — BMC(50) passes
-- [x] Verilator emulator (emulator/main.cpp) — compiles and runs
+- [x] Component decomposition (RegFile, ALU, Decoder, BusInterface) — individually verified
+- [x] Core refactored to use sub-components (RegFile, ALU, Decoder, BusInterface) — compiles, generates Verilog
+- [x] LD bug fix: write `dataLoad` to register file instead of stale `aluRes`
+- [x] Emulator (emulator/main.cpp) — Verilator compiles VCore, emulator binary TBD
 
 ### Design Decisions
 
@@ -36,9 +36,13 @@
    - Replaced with manual byte assembly using `Counter(4, inc = ...)` + shift register
    - Avoids Verilog width-truncation bug: `{8'b_payload, 24'b_shifted}` → 24-bit reg drops payload
 
-4. **Formal assertions** (Core.scala):
-   - Embedded in `GenerationFlags.formal` block with `anyseq` on bus signals
-   - Verified with `FormalConfig.withBMC(50).doVerify(Core(...))` — passes
+4. **LD write bug fix** (Core.scala):
+   - `wrData := Mux(isLD, dataLoad, aluRes)` — writes loaded data instead of stale pipeline register
+   - Original code wrote `aluRes` to regFile in WRITEBACK before `aluRes := dataLoad` took effect
+
+5. **Component decomposition** (all components):
+   - Core now instantiates RegFile, ALU, Decoder, BusInterface as sub-components
+   - Redundant inline logic removed; formal assertions focus on FSM/pipeline integration
 
 ### Verification Results
 
