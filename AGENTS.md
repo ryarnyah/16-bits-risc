@@ -66,3 +66,28 @@
 - **Formal Verification**: ✓ All 5 components pass at BMC(30): Core, ALU, Decoder, RegFile, BusInterface
 - **Verilator Emulator**: ✓ Compiles and runs, responds to bus commands (LOAD_ADDR, LOAD_DATA, STEP, RUN, READ_REG, READ_MEM, READ_PC)
 - **End-to-end counter program**: ✓ counter.asm loads, loops, counts R3 1..9, BLT branch, resets to 0
+
+### FPGA Flow (F4PGA for Basys3 / xc7a35tcpg236-1)
+
+- [x] `vendor-f4pga` installs self-contained toolchain into `vendor/`:
+  - oss-cad-suite (Yosys, openFPGALoader) – 684 MB pre-built
+  - Boost 1.90 built from source (5 libs: filesystem, program_options, iostreams, system, thread)
+  - Eigen3 headers from GitLab
+  - nextpnr-xilinx built from gatecat/xilinx-upstream
+  - Chipdb `xc7a35tcpg236-1.chipdb` (87.9 MB) generated via bbaexport + bbasm
+  - prjxray built from source (xc7frames2bit for frames→bitstream)
+  - FASM Python stub (replaces uninstallable fasm package)
+- [x] `make f4pga` runs synth → PnR → bitstream end-to-end:
+  - Yosys `synth_xilinx` with `delete {t:$scopeinfo}` fix
+  - nextpnr-xilinx PnR with basys3.xdc constraints
+  - FASM → frames (minimal Python parser + prjxray fasm_assembler)
+  - Frames → .bit (xc7frames2bit), valid Xilinx sync word `0009 0ff0...`
+- [ ] `f4pga_program` needs a Basys3 board connected via USB
+
+### GCC 15 Compatibility
+
+Several third-party C++ projects used `uint8_t` without `#include <cstdint>`:
+- `json11/json11.cpp` (nextpnr-xilinx) – patched after every fresh clone
+- `memory_mapped_file.h` (prjxray) – patched after every fresh clone
+
+Both patches are applied automically by the Makefile targets via `sed -i`.

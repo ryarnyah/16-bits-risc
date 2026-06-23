@@ -1,6 +1,8 @@
 # Build artifacts
+.idea/
 target/
 emulator/build/
+simWorkspace/
 
 # F4PGA build outputs
 f4pga/build/
