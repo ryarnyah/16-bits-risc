@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include "VSoc.h"
 #include "VSoc___024root.h"
+#include "VSoc__Syms.h"
 
 using u16 = uint16_t;
 using u32 = uint32_t;
@@ -102,7 +103,7 @@ public:
         soc->eval();
         if (traceOn) tfp->dump(cycle * 10 + 10);
 
-        // UART TX: sample after posedge
+        // UART TX: sample after negedge
         sampleTx();
 
         cycle++;
@@ -147,37 +148,38 @@ public:
         if (!rxHasData) {
             if (stdinAvailable.exchange(false)) {
                 rxByte = (u8)stdinChar.load();
-                rxState = 1;  // start bit
+                rxState = 1;
                 rxCnt = 0;
                 rxHasData = true;
                 soc->io_uartRx = 0;  // start bit
-                return;
+                return;  // skip rxCnt++ this tick — bit period is BIT_CYCLES ticks
             }
             soc->io_uartRx = 1;
             return;
         }
         rxCnt++;
         if (rxState == 1) {
-            // Start bit
             if (rxCnt >= BIT_CYCLES) {
                 rxCnt = 0;
                 rxState = 2;
                 soc->io_uartRx = (rxByte >> 0) & 1;
             }
         } else if (rxState >= 2 && rxState <= 9) {
-            // Data bits
             if (rxCnt >= BIT_CYCLES) {
                 rxCnt = 0;
                 int bitIdx = rxState - 2;
                 if (bitIdx < 7) {
                     soc->io_uartRx = (rxByte >> (bitIdx + 1)) & 1;
+                } else {
+                    // rxState = 9 → 10: after bit 7, drive line idle (1)
+                    soc->io_uartRx = 1;
                 }
                 rxState++;
             }
         } else if (rxState == 10) {
-            // Stop bit
+            // Stop bit: drive line idle (1) throughout
+            soc->io_uartRx = 1;
             if (rxCnt >= BIT_CYCLES) {
-                soc->io_uartRx = 1;
                 rxState = 0;
                 rxHasData = false;
             }
