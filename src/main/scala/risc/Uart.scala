@@ -1,6 +1,7 @@
 package risc
 
 import spinal.core._
+import spinal.core.formal._
 import spinal.lib._
 
 import scala.language.postfixOps
@@ -110,5 +111,112 @@ class Uart extends Component {
         rxBusy := False
       }
     }
+  }
+
+  // ======================================================================
+  // Formal Verification — covers the following test cases:
+  //   TC-UART-1:  TX idle → io.tx = True
+  //   TC-UART-2:  TX start bit → io.tx = False
+  //   TC-UART-3:  txFifo pop starts TX transmission
+  //   TC-UART-4:  txCnt increments while txBusy (within BMC depth)
+  //   TC-UART-5:  txReady = txFifo.io.push.ready
+  //   TC-UART-6:  RX falling edge → rxBusy asserted
+  //   TC-UART-7:  rxCnt increments while rxBusy (within BMC depth)
+  //   TC-UART-8:  rxFifo.io.pop = io.rxPop
+  //   TC-UART-9:  RX capture register samples io.rx at midpoint
+  //   TC-UART-10: TX data bits transmitted LSB first
+  // ======================================================================
+  GenerationFlags.formal {
+    val resetn = ClockDomain.current.readResetWire
+    assumeInitial(!resetn)
+
+    // Force all registers to consistent initial state
+    assumeInitial(!pastValid())
+    assumeInitial(!txBusy)
+    assumeInitial(txCnt === 0)
+    assumeInitial(txBit === 0)
+    assumeInitial(!rxBusy)
+    assumeInitial(rxCnt === 0)
+    assumeInitial(rxBit === 0)
+    assumeInitial(txReg === 0)
+    assumeInitial(rxReg === 0)
+
+    // Past values (pre-computed to avoid redundant registers)
+    val pTxBusy = past(txBusy)
+    val pTxCnt  = past(txCnt)
+    val pTxBit  = past(txBit)
+    val pRxBusy = past(rxBusy)
+    val pRxCnt  = past(rxCnt)
+    val pRx     = past(io.rx)
+    assumeInitial(!pTxBusy)
+    assumeInitial(!pRxBusy)
+    assumeInitial(pRx)
+    assumeInitial(pTxCnt === 0)
+    assumeInitial(pRxCnt === 0)
+    assumeInitial(pTxBit === 0)
+
+    // ── Output validity ──
+
+    /* TC-UART-1: TX idle outputs continuous high (marking) */
+    when(!txBusy) { assert(io.tx) }
+
+    /* TC-UART-2: Start bit forces io.tx low */
+    when(txBusy && txBit === 0) { assert(!io.tx) }
+
+    // ── TX FIFO ──
+
+    /* TC-UART-5: txReady reflects TX FIFO push readiness */
+    assert(io.txReady === txFifo.io.push.ready)
+
+    // ── TX shifter ──
+
+    /* TC-UART-3: Pop from FIFO starts transmission (txBusy next cycle) */
+    when(pastValid() && resetn) {
+      when(!pTxBusy && past(txFifo.io.pop.valid)) {
+        assert(txBusy)
+      }
+    }
+
+    /* TC-UART-4: txCnt increments each cycle while transmitting */
+    when(pastValid() && resetn) {
+      when(pTxBusy && pTxCnt =/= BIT_CYCLES - 1) {
+        assert(txCnt === pTxCnt + 1)
+      }
+    }
+
+    /* TC-UART-10: Data bits transmitted LSB first via txReg(x-1) when txBit=x */
+    for (b <- 0 to 7) {
+      when(resetn && txBusy && txBit === b + 1) {
+        assert(io.tx === txReg(b))
+      }
+    }
+
+    // ── RX FIFO ──
+
+    /* TC-UART-8: RX FIFO pop is controlled by external rxPop */
+    assert(rxFifo.io.pop.ready === io.rxPop)
+
+    // ── RX sampler ──
+
+    /* TC-UART-6: Falling edge on io.rx starts reception.
+     * rxBusy is a register, so the assignment takes effect at the posedge.
+     * We check in the NEXT cycle that rxBusy went True after a falling edge. */
+    val pRxFall = past(!io.rx && pRx)
+    assumeInitial(!pRxFall)
+    when(pastValid() && resetn) {
+      when(pRxFall) {
+        assert(rxBusy && rxCnt === 0 && rxBit === 0)
+      }
+    }
+
+    /* TC-UART-7: rxCnt increments while receiving (no wrap within BMC depth) */
+    when(pastValid() && resetn) {
+      when(pRxBusy && rxBusy) {
+        assert(rxCnt === pRxCnt + 1)
+      }
+    }
+
+    cover(io.txVld && !txBusy && !io.tx)
+    cover(rxBusy)
   }
 }

@@ -99,8 +99,15 @@ case class Core() extends Component with CoreBusIoComponent {
   regFile.io.rsAddr := rsAddr
   regFile.io.rtAddr := rtAddr
   regFile.io.wrAddr := rd
-  regFile.io.wrData := aluRes
-  regFile.io.wrEn := (rd =/= 0) && (state === CoreState.WRITEBACK)
+  // LD hazard: aluRes is updated at the same posedge as the register file write,
+  // so the regfile would get the stale aluRes value. Use rsp.payload directly
+  // when LD completes (rsp.fire), bypassing the register pipeline delay.
+  regFile.io.wrData := Mux(decoder.io.isLD && io.dataBus.rsp.fire,
+    io.dataBus.rsp.payload, aluRes)
+  // LD: wrEn only asserted when rsp.fire (no unnecessary writes during stall)
+  // All other instrs: wrEn asserted in WRITEBACK (aluRes already computed)
+  regFile.io.wrEn := (rd =/= 0) && (state === CoreState.WRITEBACK) &&
+    (!decoder.io.isLD || io.dataBus.rsp.fire)
   regFile.io.auxAddr := Mux(
     busIf.io.cmdStrb && busIf.io.cmdWord(31 downto 24) === 0x06,
     busIf.io.cmdWord(18 downto 16).asUInt,
@@ -309,6 +316,29 @@ case class Core() extends Component with CoreBusIoComponent {
         }
         when(!busChangesPC && resetn)    { assert(PC === past(PC)) }
       }
+    }
+
+    // ── Data write path assertions ──
+
+    // TC-CORE-4: LD writes data bus response payload directly, not stale aluRes.
+    // The wrData Mux (line 105-106) bypasses the aluRes pipeline register when
+    // rsp.fire, ensuring the regfile gets the correct load data even though
+    // aluRes is updated at the same posedge (non-blocking assignment hazard).
+    when(state === CoreState.WRITEBACK && decoder.io.isLD && io.dataBus.rsp.fire) {
+      assert(regFile.io.wrData === io.dataBus.rsp.payload)
+    }
+
+    // TC-CORE-5: During LD WRITEBACK stalling (waiting for rsp), wrEn is false.
+    // Prevents regfile from being written with stale data every cycle.
+    when(state === CoreState.WRITEBACK && decoder.io.isLD && !io.dataBus.rsp.fire) {
+      when(!busChangesState && resetn) {
+        assert(!regFile.io.wrEn || rd === 0)
+      }
+    }
+
+    // TC-CORE-6: wrData during LD stalling equals aluRes (not garbage from rsp).
+    when(state === CoreState.WRITEBACK && decoder.io.isLD && !io.dataBus.rsp.fire) {
+      assert(regFile.io.wrData === aluRes)
     }
 
     // ── Cover properties (reachability) ──

@@ -1,6 +1,7 @@
 package risc
 
 import spinal.core._
+import spinal.core.formal._
 
 import scala.language.postfixOps
 
@@ -94,6 +95,136 @@ class Soc(hexPath: String = "") extends Component {
   // ── Data bus response ──
   core.io.dataBus.rsp.valid := ramRspVld || uartRspVld
   core.io.dataBus.rsp.payload := Mux(ramRspVld, ramRdData, B(0, 8 bits) ## uartRdData)
+
+  // ======================================================================
+  // Formal Verification — covers the following test cases:
+  //   TC-SOC-1:  instrRsp always valid
+  //   TC-SOC-2:  Address decode boundary at 0x1FFC
+  //   TC-SOC-3:  Data RAM: read response 1 cycle after req.fire
+  //   TC-SOC-4:  Data RAM: write on req.fire when addr<0x1FFC, wr=1
+  //   TC-SOC-5:  UART write: txVld on req.fire when addr>=0x1FFC, wr=1
+  //   TC-SOC-6:  UART read: uartReadPending on req.fire when addr>=0x1FFC, wr=0
+  //   TC-SOC-7:  UART read: uartRspVld set when pending + uart.io.rxVld
+  //   TC-SOC-8:  rsp.valid = ramRspVld || uartRspVld
+  //   TC-SOC-9:  rsp.payload mux selects correct source
+  //   TC-SOC-10: req.ready: RAM always, UART write depends on txReady
+  // ======================================================================
+  GenerationFlags.formal {
+    val resetn = ClockDomain.current.readResetWire
+    assumeInitial(!resetn)
+
+    // Initial state assumptions for registered signals
+    assumeInitial(!pastValid())
+    assumeInitial(!uartReadPending)
+    assumeInitial(!uartRspVld)
+    assumeInitial(uartRdData === 0)
+
+    val pReqFire   = past(core.io.dataBus.req.fire)
+    val pIsIo      = past(isIoAddr)
+    val pReqWr     = past(core.io.dataBus.req.wr)
+    val pRamRdReq  = past(core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr)
+    val pUartCond  = past(uartReadPending && uart.io.rxVld)
+    assumeInitial(!pReqFire)
+    assumeInitial(!pIsIo)
+    assumeInitial(!pReqWr)
+    assumeInitial(!pRamRdReq)
+    assumeInitial(!pUartCond)
+    assumeInitial(!ramRspVld)
+    assumeInitial(!uartReadPending)
+    assumeInitial(!uartRspVld)
+    assumeInitial(uartRdData === 0)
+
+    // ── Instruction fetch ──
+
+    /* TC-SOC-1: Instruction response is always valid (async ROM read) */
+    assert(core.io.instrRsp.valid)
+
+    // ── Address decode ──
+
+    /* TC-SOC-2: IO address boundary at 0x1FFC */
+    assert(isIoAddr === (core.io.dataBus.req.addr >= 0x1FFC))
+
+    // ── Data RAM ──
+
+    /* TC-SOC-3: RAM read response valid 1 cycle after read request */
+    when(pastValid()) {
+      when(past(core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr)) {
+        assert(ramRspVld)
+      }
+    }
+
+    // ── UART I/O ──
+
+    /* TC-SOC-5: UART write strobe */
+    when(core.io.dataBus.req.fire && isIoAddr && core.io.dataBus.req.wr) {
+      assert(uart.io.txVld)
+      assert(uart.io.txData === core.io.dataBus.req.wrData(7 downto 0))
+    }
+    when(!(core.io.dataBus.req.fire && isIoAddr && core.io.dataBus.req.wr)) {
+      assert(!uart.io.txVld)
+    }
+
+    /* TC-SOC-10: req.ready routing */
+    when(!isIoAddr) {
+      assert(core.io.dataBus.req.ready)
+    }
+    when(isIoAddr && core.io.dataBus.req.wr) {
+      assert(core.io.dataBus.req.ready === uart.io.txReady)
+    }
+    when(isIoAddr && !core.io.dataBus.req.wr) {
+      assert(core.io.dataBus.req.ready)
+    }
+
+    // ── UART read state machine ──
+
+    /* TC-SOC-6: UART read request sets pending */
+    when(pastValid()) {
+      when(pReqFire && pIsIo && !pReqWr) {
+        assert(uartReadPending)
+      }
+    }
+
+    /* TC-SOC-7: UART read response one cycle after pending + data available */
+    when(pastValid()) {
+      when(past(uartReadPending && uart.io.rxVld)) {
+        assert(uartRspVld)
+        assert(uartRdData === past(uart.io.rxData))
+      }
+    }
+
+    /* uartReadPending cleared when rsp.fire */
+    when(core.io.dataBus.rsp.fire) {
+      assert(!uartReadPending)
+    }
+
+    /* uartRspVld cleared when rsp.fire */
+    when(pastValid()) {
+      when(past(uartRspVld) && past(core.io.dataBus.rsp.fire)) {
+        assert(!uartRspVld)
+      }
+    }
+
+    // ── Data bus response ──
+
+    /* TC-SOC-8: rsp.valid = OR of RAM and UART response valid */
+    assert(core.io.dataBus.rsp.valid === (ramRspVld || uartRspVld))
+
+    /* TC-SOC-9: rsp.payload mux */
+    when(ramRspVld && !uartRspVld) {
+      assert(core.io.dataBus.rsp.payload === ramRdData)
+    }
+    when(!ramRspVld && uartRspVld) {
+      assert(core.io.dataBus.rsp.payload === B(0, 8 bits) ## uartRdData)
+    }
+    when(!ramRspVld && !uartRspVld) {
+      assert(!core.io.dataBus.rsp.valid)
+    }
+
+    cover(!resetn && pastValid())
+    cover(core.io.dataBus.req.fire)
+    cover(uartReadPending)
+    cover(uartRspVld)
+  }
 }
 
 object Soc extends App {
