@@ -1,8 +1,7 @@
 package risc
 
-import spinal.core._
-import spinal.core.formal._
 import org.scalatest.funsuite.AnyFunSuite
+import spinal.core.formal._
 
 class AluFormalTest extends AnyFunSuite {
   test("TC-ALU-1 through TC-ALU-8: ALU formal verification") {

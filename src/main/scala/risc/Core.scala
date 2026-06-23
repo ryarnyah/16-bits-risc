@@ -1,53 +1,48 @@
 package risc
 
 import spinal.core._
-import spinal.lib._
 import spinal.core.formal._
+import spinal.lib._
+
 import scala.language.postfixOps
 
 /**
  * Top-level I/O bundle for the 16-bit RISC core.
  *
- * Provides the external debug/control bus interface (8-bit Stream protocol)
- * and debug observation signals for the emulator/testbench.
+ * Provides the external debug/control bus interface (8-bit Stream protocol),
+ * a stream-based data bus for LD/ST data access, and debug observation
+ * signals for the emulator/testbench.
  */
 case class CoreIo() extends Bundle {
   /** Debug/control bus interface (8-bit cmd/rsp Stream + ack). */
   val bus: CoreBusIo = CoreBusIo()
-  /** Current FSM state (CoreState enum, 3 bits). */
+  /** Data bus for LD/ST (stream-based request/response). */
+  val dataBus: DataBusIo = DataBusIo()
+  /** Instruction fetch bus (stream response, address driven combinatorially). */
+  val instrAddr: UInt = out UInt (16 bits)
+  val instrRsp: Stream[Bits] = Stream(Bits(16 bits))
+
   val dbgState: Bits = out Bits (3 bits)
-  /** Program counter (16-bit byte address). */
   val dbgPC: UInt = out UInt (16 bits)
-  /** Continuous execution mode flag (true when RUN command active). */
   val dbgRunning: Bool = out Bool ()
-  /** Destination register address pipeline register (3 bits). */
   val dbgRd: UInt = out UInt (3 bits)
-  /** ALU/load pipeline result register (16 bits). */
   val dbgAluRes: Bits = out Bits (16 bits)
-  /** Current instruction in the pipeline (16 bits). */
   val dbgInstr: Bits = out Bits (16 bits)
-  /** Strobe: complete 4-byte command word has been assembled. */
   val dbgCmdPhrase: Bool = out Bool ()
-  /** Active: response bytes are being shifted out to the bus master. */
   val dbgRspPhrase: Bool = out Bool ()
-  /** Strobe: bus command word is valid (alias for dbgCmdPhrase). */
   val dbgBusWordFire: Bool = out Bool ()
-  /** Most recently assembled 32-bit command word. */
   val dbgCmdBuf: Bits = out Bits (32 bits)
-  /** Current 32-bit response word being sent to the bus master. */
   val dbgRspBuf: Bits = out Bits (32 bits)
-  /** Read-only value of register R1 for debug/monitoring. */
   val dbgRegFile1: Bits = out Bits (16 bits)
 }
 
-case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBusIoComponent {
+case class Core() extends Component with CoreBusIoComponent {
   val io: CoreIo = CoreIo()
   io.bus.cmd.asSlave()
   io.bus.rsp.asMaster()
   io.bus.ack.asOutput()
-
-  private val memAddrBits = log2Up(config.memWordCount)
-  private val byteAddrBits = log2Up(config.memWordCount * 2)
+  io.instrRsp.asSlave()
+  io.dataBus.asMaster()
 
   // === FSM state ===
   // ISA §3: Multi-cycle execution — FETCH → DECODE → (LDI_FETCH) → WRITEBACK → IDLE
@@ -71,12 +66,8 @@ case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBu
   busIf.io.rsp >> io.bus.rsp
   io.bus.ack := busIf.io.ack
 
-  // === Memory (single-port synchronous word-addressable RAM) ===
-  private val memory = Mem(Bits(16 bits), wordCount = config.memWordCount)
-
-  // === Instruction fetch ===
-  private val pcWordAddr = PC(byteAddrBits - 1 downto 1).resize(memAddrBits)
-  private val fetchedInstr = memory.readSync(pcWordAddr)
+  // === Instruction fetch via stream bus from SoC ===
+  // addr driven combinatorially above; response arrives on io.instrRsp
 
   // === Decoder ===
   decoder.io.instr := instr
@@ -91,9 +82,8 @@ case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBu
 
   // === Load/store effective address ===
   // ISA §3.3: Effective address = Rs + sext(off), word-aligned
+  // Data accesses go through the stream-based data bus to SoC.
   private val effAddr = (regFile.io.rsVal.asSInt + sextVal.asSInt).asBits.resized
-  private val dataWordAddr = effAddr(15 downto 1).asUInt.resize(memAddrBits)
-  private val dataLoad = memory.readSync(dataWordAddr)
 
   // === Register file ===
   // Branch (BEQ/BNE/BLT):   Rs in instr[11:9], Rt in instr[8:6]   (ISA §3.4)
@@ -109,7 +99,7 @@ case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBu
   regFile.io.rsAddr := rsAddr
   regFile.io.rtAddr := rtAddr
   regFile.io.wrAddr := rd
-  regFile.io.wrData := Mux(decoder.io.isLD, dataLoad, aluRes)
+  regFile.io.wrData := aluRes
   regFile.io.wrEn := (rd =/= 0) && (state === CoreState.WRITEBACK)
   regFile.io.auxAddr := Mux(
     busIf.io.cmdStrb && busIf.io.cmdWord(31 downto 24) === 0x06,
@@ -132,28 +122,18 @@ case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBu
   private val stVal = regFile.io.rtVal
 
   // === Bus command processing ===
-  // Commands: 0x01=LOAD_ADDR, 0x02=LOAD_DATA, 0x03=RESET, 0x04=STEP,
-  //           0x05=RUN, 0x06=READ_REG, 0x07=READ_MEM, 0x08=READ_PC
-  private val memPtr = Reg(UInt(memAddrBits bits)) init 0
-
+  // Commands: 0x03=RESET, 0x04=STEP, 0x05=RUN, 0x06=READ_REG, 0x08=READ_PC
   busIf.io.cmdDone := False
   busIf.io.rspStrb := False
   busIf.io.rspWord := 0
 
   when(busIf.io.cmdStrb) {
     switch(busIf.io.cmdWord(31 downto 24)) {
-      is(0x01) { memPtr := busIf.io.cmdWord(memAddrBits - 1 downto 0).asUInt; busIf.io.cmdDone := True }
-      is(0x02) { memPtr := memPtr + 1; busIf.io.cmdDone := True }
       is(0x03) { state := CoreState.IDLE; PC := 0; running := False; busIf.io.cmdDone := True }
       is(0x04) { state := CoreState.FETCH; busIf.io.cmdDone := True }
       is(0x05) { state := CoreState.FETCH; running := True; busIf.io.cmdDone := True }
       is(0x06) {
         busIf.io.rspWord := B(0, 16 bits) ## regFile.io.auxVal
-        busIf.io.rspStrb := True
-      }
-      is(0x07) {
-        val memIdx = busIf.io.cmdWord(memAddrBits - 1 downto 0).asUInt
-        busIf.io.rspWord := B(0, 16 bits) ## memory.readAsync(memIdx)
         busIf.io.rspStrb := True
       }
       is(0x08) {
@@ -163,12 +143,18 @@ case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBu
     }
   }
 
-  // === Memory writes ===
-  // Bus LOAD_DATA
-  memory.write(memPtr, busIf.io.cmdWord(15 downto 0),
-    busIf.io.cmdStrb && (busIf.io.cmdWord(31 downto 24) === 0x02))
-  // ISA §3.3: ST instruction writes to memory at effective address
-  memory.write(dataWordAddr, stVal, decoder.io.isST)
+  // === Data bus default assignments ===
+  io.dataBus.req.payload.addr := effAddr.asUInt
+  io.dataBus.req.payload.wrData := stVal
+  io.dataBus.req.valid := False
+  io.dataBus.req.payload.wr := False
+  io.dataBus.rsp.ready := False
+
+  // === Instruction bus default (not ready outside FETCH/LDI_FETCH) ===
+  io.instrRsp.ready := False
+
+  // Instruction fetch address driven combinatorially from PC
+  io.instrAddr := PC
 
   // === FSM: done() helper ===
   private def done(): Unit = {
@@ -179,15 +165,29 @@ case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBu
   // ISA §3: Multi-cycle execution — FETCH → DECODE → (LDI_FETCH) → WRITEBACK
   switch(state) {
     is(CoreState.FETCH) {
-      instr := fetchedInstr
-      PC := PC + 2
-      state := CoreState.DECODE
+      io.instrRsp.ready := True
+      when(io.instrRsp.fire) {
+        instr := io.instrRsp.payload
+        PC := PC + 2
+        state := CoreState.DECODE
+      }
     }
     is(CoreState.DECODE) {
       rd := (decoder.io.hasRd ? decoder.io.rdField | B"000").asUInt
       when(decoder.io.isALU) { aluRes := alu.io.result; state := CoreState.WRITEBACK }
-      when(decoder.io.isLD)  { state := CoreState.WRITEBACK }
-      when(decoder.io.isST)  { done() }
+      when(decoder.io.isLD) {
+        io.dataBus.req.valid := True
+        io.dataBus.req.payload.addr := effAddr.asUInt
+        io.dataBus.req.payload.wr := False
+        when(io.dataBus.req.fire) { state := CoreState.WRITEBACK }
+      }
+      when(decoder.io.isST) {
+        io.dataBus.req.valid := True
+        io.dataBus.req.payload.addr := effAddr.asUInt
+        io.dataBus.req.payload.wrData := stVal
+        io.dataBus.req.payload.wr := True
+        when(io.dataBus.req.fire) { done() }
+      }
       when(decoder.io.isJMP) { PC := regFile.io.rsVal.asUInt; done() }
       when(decoder.io.isBranch) {
         when(brTaken) { PC := brTarget.asUInt }
@@ -196,13 +196,23 @@ case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBu
       when(decoder.io.isLDI) { state := CoreState.LDI_FETCH }
     }
     is(CoreState.LDI_FETCH) {
-      aluRes := fetchedInstr
-      PC := PC + 2
-      state := CoreState.WRITEBACK
+      io.instrRsp.ready := True
+      when(io.instrRsp.fire) {
+        aluRes := io.instrRsp.payload
+        PC := PC + 2
+        state := CoreState.WRITEBACK
+      }
     }
     is(CoreState.WRITEBACK) {
-      when(decoder.io.isLD) { aluRes := dataLoad }
-      done()
+      when(decoder.io.isLD) {
+        io.dataBus.rsp.ready := True
+        when(io.dataBus.rsp.fire) {
+          aluRes := io.dataBus.rsp.payload
+          done()
+        }
+      } otherwise {
+        done()
+      }
     }
     default {}
   }
@@ -249,7 +259,6 @@ case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBu
     assumeInitial(instr === 0)
     assumeInitial(rd === 0)
     assumeInitial(aluRes === 0)
-    assumeInitial(memPtr === 0)
 
     // ── Reset invariants ──
     // After the initial reset (checked only in first cycle, before any writes):
@@ -293,9 +302,11 @@ case class Core(config: CoreConfig = CoreConfig()) extends Component with CoreBu
         when(!busChangesState && resetn) { assert(state === CoreState.WRITEBACK) }
         when(!busChangesPC && resetn)    { assert(PC === past(PC) + 2) }
       }
-      // TC-CORE-3: WRITEBACK transitions to IDLE or FETCH (never stays)
+      // TC-CORE-3: WRITEBACK transitions to IDLE, FETCH, or stays (LD waiting for rsp)
       when(past(state) === CoreState.WRITEBACK) {
-        when(!busChangesState && resetn) { assert(state === CoreState.IDLE || state === CoreState.FETCH) }
+        when(!busChangesState && resetn) {
+          assert(state === CoreState.IDLE || state === CoreState.FETCH || state === CoreState.WRITEBACK)
+        }
         when(!busChangesPC && resetn)    { assert(PC === past(PC)) }
       }
     }

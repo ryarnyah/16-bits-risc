@@ -1,8 +1,7 @@
 package risc
 
-import spinal.core._
-import spinal.core.formal._
 import org.scalatest.funsuite.AnyFunSuite
+import spinal.core.formal._
 
 class BusInterfaceFormalTest extends AnyFunSuite {
   test("TC-BI-1 through TC-BI-6: BusInterface formal verification") {

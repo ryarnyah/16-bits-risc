@@ -6,6 +6,9 @@ HEX_DIR := examples
 
 SBT := sbt
 VERILATOR := verilator
+VERILATOR_BIN := $(shell readlink -f $$(which $(VERILATOR)))
+VERILATOR_ROOT := $(dir $(VERILATOR_BIN))../share/verilator
+VERILATOR_INC := $(VERILATOR_ROOT)/include
 
 .PHONY: all help rtl formal emulator test clean assemble \
         examples/prime.hex examples/echo.hex uart
@@ -24,26 +27,29 @@ help:
 	@echo "  clean                - Remove all build artifacts"
 
 rtl:
-	$(SBT) run
+	$(SBT) "runMain risc.Soc"
 
 formal: rtl
 	$(SBT) "testOnly risc.CoreFormalTest"
 
-emulator: $(TARGET_DIR)/Core.sv
+emulator: $(TARGET_DIR)/Soc.sv
 	mkdir -p $(BUILD_DIR)
 	cd $(BUILD_DIR) && $(VERILATOR) --cc --trace -Wall \
 		-Wno-DECLFILENAME -Wno-UNUSED -Wno-UNOPTFLAT \
 		-Wno-WIDTH -Wno-CASEINCOMPLETE -Wno-PINCONNECTEMPTY \
-		-CFLAGS "-std=c++17 -O2" --top-module Core \
-		$(abspath $(TARGET_DIR))/Core.sv
-	cd $(BUILD_DIR) && $(MAKE) -f VCore.mk
-	$(CXX) -std=c++17 -O2 -I$(BUILD_DIR) -I/usr/share/verilator/include \
+		-Wno-UNDRIVEN \
+		-CFLAGS "-std=c++17 -O2" --top-module Soc \
+		$(abspath $(TARGET_DIR))/Soc.sv
+	$(MAKE) -C $(BUILD_DIR)/obj_dir -f VSoc.mk
+	$(CXX) -std=c++17 -O2 -I$(BUILD_DIR)/obj_dir -I$(VERILATOR_ROOT)/include \
 		-o $(BUILD_DIR)/emulator $(EMU_DIR)/main.cpp \
-		$(BUILD_DIR)/VCore__ALL.a \
-		-L/usr/share/verilator/include -lverilator
+		$(BUILD_DIR)/obj_dir/VSoc__ALL.a \
+		$(BUILD_DIR)/obj_dir/verilated.o \
+		$(BUILD_DIR)/obj_dir/verilated_vcd_c.o \
+		$(BUILD_DIR)/obj_dir/verilated_threads.o
 
-$(TARGET_DIR)/Core.sv: $(shell find src/main -name '*.scala')
-	$(SBT) run
+$(TARGET_DIR)/Soc.sv: $(shell find src/main -name '*.scala')
+	$(SBT) "runMain risc.Soc"
 
 test:
 	$(SBT) test

@@ -14,7 +14,7 @@ lazy val root = (project in file("."))
   .settings(
     name := "risc-core",
     libraryDependencies ++= Seq(spinalCore, spinalLib, spinalIdslPlugin, scalaTest),
-    Compile / mainClass := Some("risc.Core"),
+    Compile / mainClass := Some("risc.Soc"),
     fork := true,
     scalacOptions += "-deprecation"
   )

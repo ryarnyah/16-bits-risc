@@ -1,8 +1,7 @@
 package risc
 
 import spinal.core._
-import spinal.lib._
-import spinal.core.formal._
+
 import scala.language.postfixOps
 
 /**
