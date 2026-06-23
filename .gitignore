@@ -1,8 +1,10 @@
 # Build artifacts
 .idea/
+.bsp/
 target/
 emulator/build/
 simWorkspace/
+sim.vcd
 
 # F4PGA build outputs
 f4pga/build/
