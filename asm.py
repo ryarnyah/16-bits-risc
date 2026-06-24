@@ -25,7 +25,7 @@ def parse_num(s):
 
 def tokenize(line):
     line = re.sub(r";.*", "", line).strip()
-    return re.findall(r'[A-Za-z_]\w*:|[A-Za-z_]\w*|#?[+\-]?\w+|[\[\],:+()]', line)
+    return re.findall(r'\.[A-Za-z_]\w*:|\.[A-Za-z_]\w*|[A-Za-z_]\w*:|[A-Za-z_]\w*|#?[+\-]?\w+|[\[\],:+()]', line)
 
 def first_pass(lines):
     labels = {}
@@ -50,6 +50,8 @@ def first_pass(lines):
         if toks and toks[0] in OPCODES:
             if toks[0] == "LDI":
                 addr += 4
+            elif toks[0] == "JMP" and len(toks) > 1 and toks[1] not in REGS:
+                addr += 6  # LDI R4,#label + JMP R4 (3 words)
             else:
                 addr += 2
     return labels
@@ -82,9 +84,19 @@ def second_pass(lines, labels):
         args = [strip_hash(t) for t in toks[1:] if t not in (",", "[", "]", "+", "#") and t != "+"]
         instr = 0
 
-        if op == 0xB:   # JMP Rs
-            rs = REGS[args[0]]
-            instr = (op << 12) | (rs << 9)
+        if op == 0xB:   # JMP Rs  (also accepts label via LDI R4,#label + JMP R4)
+            if args[0] in REGS:
+                rs = REGS[args[0]]
+                instr = (op << 12) | (rs << 9)
+            else:
+                # Pseudo-op: JMP label → LDI R4, #label + JMP R4
+                target = labels.get(args[0])
+                if target is None:
+                    target = parse_num(args[0])
+                output.append((addr, ((0xF << 12) | (4 << 9)) & 0xFFFF))
+                output.append((addr + 2, target & 0xFFFF))
+                instr = (0xB << 12) | (4 << 9)
+                addr += 4
 
         elif op in (0xC, 0xD, 0xE):   # BEQ BNE BLT Rs, Rt, offset
             rs = REGS[args[0]]
@@ -94,6 +106,8 @@ def second_pass(lines, labels):
                 offset = (target - addr - 2) // 2
             else:
                 offset = parse_num(args[2])
+            if offset < -32 or offset > 31:
+                print(f"Warning: branch at byte {addr} offset {offset} exceeds ±32 range", file=sys.stderr)
             offset &= 0x3F
             instr = (op << 12) | (rs << 9) | (rt << 6) | offset
 

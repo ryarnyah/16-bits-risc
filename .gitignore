@@ -5,6 +5,7 @@ target/
 emulator/build/
 simWorkspace/
 sim.vcd
+.metals
 
 # F4PGA build outputs
 f4pga/build/
