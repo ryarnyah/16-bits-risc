@@ -75,7 +75,8 @@ uart: examples/echo.hex emulator
 
 C_TESTS := minimal multest test fib dec double mulonly \
            or_test bne_test xori_test all_alu_test beq_test ldst_test \
-           collatz div_test mod_test sum fib5 fact gcd prime_cnt fib15
+           collatz div_test mod_test sum fib5 fact gcd prime_cnt fib15 \
+           mod_simple mod_simple2
 
 test-programs: emulator
 	@for t in $(C_TESTS); do \
@@ -92,7 +93,8 @@ test-programs-clean:
 	      examples/mod_test.{asm,hex} examples/sum.{asm,hex} \
 	      examples/fib5.{asm,hex} examples/fact.{asm,hex} \
 	      examples/gcd.{asm,hex} examples/prime_cnt.{asm,hex} \
-	      examples/fib15.{asm,hex}
+	      examples/fib15.{asm,hex} examples/mod_simple.{asm,hex} \
+	      examples/mod_simple2.{asm,hex}
 
 # ======================================================================
 # F4PGA — Basys3 (Artix-7 XC7A35T) FPGA implementation

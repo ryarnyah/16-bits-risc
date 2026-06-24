@@ -28,6 +28,8 @@ TESTS = [
     ('gcd.c',          0x06,  5000),    #   6
     ('prime_cnt.c',    0x0A,  100000),  #  10
     ('fib15.c',        0x262, 300000),  # 610
+    ('mod_simple.c',   0x01,  10000),  #   1  (7 % 3)
+    ('mod_simple2.c',  0x01,  10000),  #   1  (7 % 3 with locals)
 ]
 
 def compile_c(c_file):
