@@ -10,7 +10,7 @@ VERILATOR_BIN := $(shell readlink -f $$(which $(VERILATOR)))
 VERILATOR_ROOT := $(dir $(VERILATOR_BIN))../share/verilator
 VERILATOR_INC := $(VERILATOR_ROOT)/include
 
-.PHONY: all help rtl formal emulator test clean assemble \
+.PHONY: all help rtl formal emulator test test-programs clean assemble \
         examples/prime.hex examples/echo.hex uart \
         f4pga f4pga_program vendor-f4pga
 
@@ -23,6 +23,7 @@ help:
 	@echo "  formal               - Run formal verification (BMC 50)"
 	@echo "  emulator             - Build Verilator emulator"
 	@echo "  test                 - Run sbt unit tests"
+	@echo "  test-programs        - Compile & run all C test programs via emulator"
 	@echo "  assemble             - Assemble all .asm files in examples/"
 	@echo "  uart                 - Run UART echo demo"
 	@echo "  vendor-f4pga         - Install F4PGA toolchain into vendor/"
@@ -68,6 +69,30 @@ examples/counter.hex: asm.py
 
 uart: examples/echo.hex emulator
 	$(BUILD_DIR)/emulator --uart examples/echo.hex
+
+# ======================================================================
+# C test programs — compile .c -> .hex, run via emulator
+
+C_TESTS := minimal multest test fib dec double mulonly \
+           or_test bne_test xori_test all_alu_test beq_test ldst_test \
+           collatz div_test mod_test sum fib5 fact gcd prime_cnt fib15
+
+test-programs: emulator
+	@for t in $(C_TESTS); do \
+		echo "  cc examples/$$t.c -> examples/$$t.hex"; \
+		python3 cc.py examples/$$t.c --hex examples/$$t.hex || exit 1; \
+	done
+	python3 run_tests.py
+
+test-programs-clean:
+	rm -f examples/or_test.{asm,hex} examples/bne_test.{asm,hex} \
+	      examples/xori_test.{asm,hex} examples/all_alu_test.{asm,hex} \
+	      examples/beq_test.{asm,hex} examples/ldst_test.{asm,hex} \
+	      examples/collatz.{asm,hex} examples/div_test.{asm,hex} \
+	      examples/mod_test.{asm,hex} examples/sum.{asm,hex} \
+	      examples/fib5.{asm,hex} examples/fact.{asm,hex} \
+	      examples/gcd.{asm,hex} examples/prime_cnt.{asm,hex} \
+	      examples/fib15.{asm,hex}
 
 # ======================================================================
 # F4PGA — Basys3 (Artix-7 XC7A35T) FPGA implementation
@@ -335,4 +360,6 @@ f4pga_program: $(F4PGA_BIT)
 clean:
 	rm -rf $(TARGET_DIR) $(BUILD_DIR) $(F4PGA_DIR) $(VENDOR_DIR) target/sim target/formal
 	rm -f examples/*.hex
+	rm -f examples/or_test.asm examples/bne_test.asm examples/xori_test.asm \
+	      examples/all_alu_test.asm examples/beq_test.asm examples/ldst_test.asm
 	rm -rf /tmp/fasm_stub

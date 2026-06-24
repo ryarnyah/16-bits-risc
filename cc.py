@@ -1811,8 +1811,11 @@ class CGen:
     def _needs_runtime(self):
         """Check if any binary op uses mul/div/mod."""
         def walk(n):
-            if isinstance(n, BinaryOp) and n.op in (TOK_STAR, TOK_SLASH, TOK_PERCENT):
-                yield n.op
+            if isinstance(n, BinaryOp):
+                if n.op in (TOK_STAR, TOK_SLASH, TOK_PERCENT):
+                    yield n.op
+                yield from walk(n.left)
+                yield from walk(n.right)
             elif isinstance(n, UnaryOp):
                 yield from walk(n.expr)
             elif isinstance(n, Assignment):
@@ -1863,6 +1866,8 @@ class CGen:
 
         if TOK_STAR in rts:
             self.emit('__mul16:')
+            self.emit('    ST R6, [R7]')
+            self.emit('    ADDI R7, R7, #-2')
             self.emit('    XOR R3, R3, R3')
             self.emit('    ADDI R4, R0, #16')
             self.emit('__mul_lp:')
@@ -1877,6 +1882,8 @@ class CGen:
             self.emit('    ADDI R4, R4, #-1')
             self.emit('    BNE R4, R0, __mul_lp')
             self.emit('    ADD R1, R0, R3')
+            self.emit('    ADDI R7, R7, #2')
+            self.emit('    LD R6, [R7]')
             self.emit('    JMP R5')
             self.emit()
 
@@ -1885,9 +1892,11 @@ class CGen:
             self.emit('    BEQ R1, R0, __div_exit')
             self.emit('    ST R5, [R7]')
             self.emit('    ADDI R7, R7, #-2')
+            self.emit('    ST R6, [R7]')
+            self.emit('    ADDI R7, R7, #-2')
             self.emit('    XOR R3, R3, R3')
             self.emit('    ADDI R4, R0, #16')
-            self.emit('    XOR R5, R0, R5')
+            self.emit('    XOR R5, R5, R5')
             self.emit('__div_lp:')
             self.emit('    ADDI R6, R0, #1')
             self.emit('    SLL R5, R5, R6')
@@ -1910,6 +1919,8 @@ class CGen:
             self.emit('    BNE R4, R0, __div_lp')
             self.emit('    ADD R1, R0, R3')
             self.emit('    ADDI R7, R7, #2')
+            self.emit('    LD R6, [R7]')
+            self.emit('    ADDI R7, R7, #2')
             self.emit('    LD R5, [R7]')
             self.emit('    JMP R5')
             self.emit()
@@ -1919,9 +1930,11 @@ class CGen:
             self.emit('    BEQ R1, R0, __div_exit')
             self.emit('    ST R5, [R7]')
             self.emit('    ADDI R7, R7, #-2')
+            self.emit('    ST R6, [R7]')
+            self.emit('    ADDI R7, R7, #-2')
             self.emit('    XOR R3, R3, R3')
             self.emit('    ADDI R4, R0, #16')
-            self.emit('    XOR R5, R0, R5')
+            self.emit('    XOR R5, R5, R5')
             self.emit('__mod_lp:')
             self.emit('    ADDI R6, R0, #1')
             self.emit('    SLL R5, R5, R6')
@@ -1940,6 +1953,8 @@ class CGen:
             self.emit('    ADDI R4, R4, #-1')
             self.emit('    BNE R4, R0, __mod_lp')
             self.emit('    ADD R1, R0, R5')
+            self.emit('    ADDI R7, R7, #2')
+            self.emit('    LD R6, [R7]')
             self.emit('    ADDI R7, R7, #2')
             self.emit('    LD R5, [R7]')
             self.emit('    JMP R5')

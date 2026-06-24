@@ -60,12 +60,43 @@
    - Uses clean Verilog port names (no more `_zz_` mangling)
    - Supports `s [n]` for multi-step; shows PC after each step
 
+9. **Branch relaxation in assembler** (asm.py):
+   - BEQ/BNE with offset outside ±32 range are relaxed to inverted condition + JMP
+   - Example: `BEQ Rs,Rt,far` → `BNE Rs,Rt,3; JMP far` (1+3 words)
+   - Prevents silent truncation of 6-bit signed offset field
+   - BLT relaxation not yet supported (error on out-of-range)
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully
 - **Formal Verification**: ✓ All 5 components pass at BMC(30): Core, ALU, Decoder, RegFile, BusInterface
 - **Verilator Emulator**: ✓ Compiles and runs, responds to bus commands (LOAD_ADDR, LOAD_DATA, STEP, RUN, READ_REG, READ_MEM, READ_PC)
 - **End-to-end counter program**: ✓ counter.asm loads, loops, counts R3 1..9, BLT branch, resets to 0
+- **C99 Compiler (cc.py)**: ✓ Compiles C programs to RISC assembly, with peephole optimizer and runtime lib (mul/div/mod)
+- **Assembler (asm.py)**: ✓ `JMP label` pseudo-op emits `LDI R4,#label; JMP R4` (3 words) to avoid ±32-word branch limit
+
+#### ISA Coverage (14 test programs, all pass via `make test-programs`)
+
+| Opcode | Mnemonic | Test |
+|--------|----------|------|
+| 0x0 | ADD | `all_alu_test.c`, `fib.c`, `multest.c` |
+| 0x1 | ADDI | everywhere (stack ops, load const) |
+| 0x2 | XOR | `all_alu_test.c`, `__mul16` (XOR R3,R3,R3) |
+| 0x3 | XORI | `xori_test.c` (`~0x00FF` via XORI #-1) |
+| 0x4 | SUB | `all_alu_test.c`, `fib.c`, `dec.c` |
+| 0x5 | AND | `all_alu_test.c`, `__mul16` |
+| 0x6 | OR | `or_test.c`, `all_alu_test.c` |
+| 0x7 | SLL | `all_alu_test.c`, `__mul16` |
+| 0x8 | SRL | `all_alu_test.c`, `__mul16` |
+| 0x9 | LD | everywhere (load args, locals, stack) |
+| 0xA | ST | everywhere (store args, locals, stack) |
+| 0xB | JMP | `fib.c`, `dec.c` (call/return via R5) |
+| 0xC | BEQ | `beq_test.c`, `__mul16` loops |
+| 0xD | BNE | `bne_test.c` (`while (i != 0)`) |
+| 0xE | BLT | `fib.c`, `all_alu_test.c`, `collatz.c` |
+| 0xF | LDI | everywhere (load addresses, constants) |
+
+- **SRA** (arithmetic right shift): NOT implemented — no aluFunc encoding, no assembler mnemonic, no decoder entry. 16 opcode slots are all filled.
 
 ### FPGA Flow (F4PGA for Basys3 / xc7a35tcpg236-1)
 

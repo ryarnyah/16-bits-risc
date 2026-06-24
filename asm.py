@@ -27,10 +27,32 @@ def tokenize(line):
     line = re.sub(r";.*", "", line).strip()
     return re.findall(r'\.[A-Za-z_]\w*:|\.[A-Za-z_]\w*|[A-Za-z_]\w*:|[A-Za-z_]\w*|#?[+\-]?\w+|[\[\],:+()]', line)
 
-def first_pass(lines):
+OPPOSITE_COND = {"BEQ": "BNE", "BNE": "BEQ", "BLT": None}
+
+def instr_size(toks, relaxed, line_no):
+    """Return instruction size in bytes.  relaxed is a set of line numbers
+       whose branch instruction should be expanded (relaxed -> 8 bytes)."""
+    if not toks:
+        return 0
+    if toks[0] in (".org", ".ORG"):
+        return 0
+    if toks[0] in (".word", ".dw", ".WORD", ".DW"):
+        cnt = sum(1 for t in toks[1:] if t != ",")
+        return cnt * 2
+    if toks[0] not in OPCODES:
+        return 0
+    if toks[0] == "LDI":
+        return 4
+    if toks[0] == "JMP" and len(toks) > 1 and toks[1] not in REGS:
+        return 6  # LDI R4,#label + JMP R4 (3 words)
+    if toks[0] in ("BEQ", "BNE", "BLT") and line_no in relaxed:
+        return 8  # 1 word inverted cond + 3 words JMP
+    return 2
+
+def compute_labels(lines, relaxed):
     labels = {}
     addr = 0
-    for line in lines:
+    for i, line in enumerate(lines):
         toks = tokenize(line)
         if not toks:
             continue
@@ -38,28 +60,41 @@ def first_pass(lines):
             label = toks[0][:-1]
             labels[label] = addr
             toks = toks[1:]
-        if toks and toks[0] in (".org", ".ORG"):
-            addr = parse_num(toks[1])
-            continue
-        if toks and toks[0] in (".word", ".dw", ".WORD", ".DW"):
-            for t in toks[1:]:
-                if t == ",":
-                    continue
-                addr += 2
-            continue
-        if toks and toks[0] in OPCODES:
-            if toks[0] == "LDI":
-                addr += 4
-            elif toks[0] == "JMP" and len(toks) > 1 and toks[1] not in REGS:
-                addr += 6  # LDI R4,#label + JMP R4 (3 words)
-            else:
-                addr += 2
+        addr += instr_size(toks, relaxed, i)
     return labels
 
-def second_pass(lines, labels):
+def compute_relaxed(lines):
+    """Iteratively find which branch lines need relaxation (offset > ±32)."""
+    relaxed = set()
+    while True:
+        labels = compute_labels(lines, relaxed)
+        changed = False
+        addr = 0
+        for i, line in enumerate(lines):
+            toks = tokenize(line)
+            if not toks:
+                continue
+            if toks[0].endswith(":"):
+                toks = toks[1:]
+            sz = instr_size(toks, relaxed, i)
+            if toks and toks[0] in ("BEQ", "BNE", "BLT"):
+                args = [strip_hash(t) for t in toks[1:] if t not in (",", "[", "]", "+", "#") and t != "+"]
+                if len(args) >= 3 and args[2] in labels:
+                    target = labels[args[2]]
+                    offset = (target - addr - 2) // 2
+                    if offset < -32 or offset > 31:
+                        if i not in relaxed:
+                            relaxed.add(i)
+                            changed = True
+            addr += sz
+        if not changed:
+            break
+    return relaxed
+
+def second_pass(lines, labels, relaxed):
     output = []
     addr = 0
-    for line in lines:
+    for i, line in enumerate(lines):
         toks = tokenize(line)
         if not toks:
             continue
@@ -104,6 +139,19 @@ def second_pass(lines, labels):
             if args[2] in labels:
                 target = labels[args[2]]
                 offset = (target - addr - 2) // 2
+                if i in relaxed:
+                    if op == 0xC or op == 0xD:
+                        opp_op = 0xD if op == 0xC else 0xC
+                        opp_instr = (opp_op << 12) | (rs << 9) | (rt << 6) | 3
+                        output.append((addr, opp_instr))
+                        output.append((addr + 2, ((0xF << 12) | (4 << 9)) & 0xFFFF))
+                        output.append((addr + 4, target & 0xFFFF))
+                        output.append((addr + 6, (0xB << 12) | (4 << 9)))
+                        addr += 8
+                        continue
+                    else:
+                        print(f"Error: BLT at byte {addr} offset {offset} cannot be relaxed", file=sys.stderr)
+                        sys.exit(1)
             else:
                 offset = parse_num(args[2])
             if offset < -32 or offset > 31:
@@ -156,8 +204,9 @@ def main():
     with open(args.input) as f:
         lines = f.readlines()
 
-    labels = first_pass(lines)
-    prog = second_pass(lines, labels)
+    relaxed = compute_relaxed(lines)
+    labels = compute_labels(lines, relaxed)
+    prog = second_pass(lines, labels, relaxed)
 
     lines_out = []
     for _, word in prog:
