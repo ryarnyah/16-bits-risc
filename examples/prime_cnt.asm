@@ -60,6 +60,7 @@ is_prime:
     XOR R1, R0, R0
     JMP is_prime_epi
 .el4:
+.ei5:
     LD R1, [R6 -2]
     ADDI R1, R1, #1
     ST R1, [R6 -2]

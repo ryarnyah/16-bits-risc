@@ -7,7 +7,7 @@ OPCODES = {
     "ADD":  0, "ADDI": 1, "XOR": 2, "XORI": 3,
     "SUB":  4, "AND":  5, "OR":   6, "SLL":  7,
     "SRL":  8, "LD":   9, "ST":   0xA, "JMP": 0xB,
-    "BEQ": 0xC, "BNE": 0xD, "BLT": 0xE, "LDI": 0xF,
+    "BEQ": 0xC, "BNE": 0xD, "BLT": 0xE, "BGE": 0xE, "LDI": 0xF,
 }
 
 REGS = {f"R{i}": i for i in range(8)}
@@ -27,7 +27,7 @@ def tokenize(line):
     line = re.sub(r";.*", "", line).strip()
     return re.findall(r'\.[A-Za-z_]\w*:|\.[A-Za-z_]\w*|[A-Za-z_]\w*:|[A-Za-z_]\w*|#?[+\-]?\w+|[\[\],:+()]', line)
 
-OPPOSITE_COND = {"BEQ": "BNE", "BNE": "BEQ", "BLT": None}
+OPPOSITE_COND = {"BEQ": "BNE", "BNE": "BEQ", "BLT": "BGE"}
 
 def instr_size(toks, relaxed, line_no):
     """Return instruction size in bytes.  relaxed is a set of line numbers
@@ -149,9 +149,15 @@ def second_pass(lines, labels, relaxed):
                         output.append((addr + 6, (0xB << 12) | (4 << 9)))
                         addr += 8
                         continue
-                    else:
-                        print(f"Error: BLT at byte {addr} offset {offset} cannot be relaxed", file=sys.stderr)
-                        sys.exit(1)
+                    elif op == 0xE:  # BLT
+                        # BGE = BLT with swapped registers (Rt, Rs)
+                        opp_instr = (0xE << 12) | (rt << 9) | (rs << 6) | 3
+                        output.append((addr, opp_instr))
+                        output.append((addr + 2, ((0xF << 12) | (4 << 9)) & 0xFFFF))
+                        output.append((addr + 4, target & 0xFFFF))
+                        output.append((addr + 6, (0xB << 12) | (4 << 9)))
+                        addr += 8
+                        continue
             else:
                 offset = parse_num(args[2])
             if offset < -32 or offset > 31:

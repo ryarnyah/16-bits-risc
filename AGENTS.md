@@ -60,11 +60,21 @@
    - Uses clean Verilog port names (no more `_zz_` mangling)
    - Supports `s [n]` for multi-step; shows PC after each step
 
-9. **Branch relaxation in assembler** (asm.py):
-   - BEQ/BNE with offset outside ±32 range are relaxed to inverted condition + JMP
-   - Example: `BEQ Rs,Rt,far` → `BNE Rs,Rt,3; JMP far` (1+3 words)
-   - Prevents silent truncation of 6-bit signed offset field
-   - BLT relaxation not yet supported (error on out-of-range)
+ 9. **BLT branch relaxation in assembler** (asm.py):
+    - BEQ/BNE/BLT with offset outside ±32 range are relaxed to inverted condition + JMP
+    - Example: `BEQ Rs,Rt,far` → `BNE Rs,Rt,3; JMP far` (1+3 words)
+    - BLT added BGE as opposite opcode; relaxation follows same pattern
+    - Prevents silent truncation of 6-bit signed offset field
+
+10. **C compiler bug fixes** (cc.py):
+    - `_gen_cond` constant condition fix: `cv_bool != invert` was inverted, causing `while(1)` to exit immediately
+    - `_gen_cond` TOK_GE dead code removed: leftover `emit_lbl(m)` referenced undefined label `m`
+    - `_gen_cond` TOK_LOR `invert=True` fix: replaced wrong jump logic with `_gen_cond(left, m, True); JMP end; m: _gen_cond(right, target, True); end:`
+    - `_gen_if` label chain fix: nested if-else (else-if) now passes outer end label to inner if, preventing inner return from falling through to the outer loop-back
+
+11. **Emulator stdin queue** (emulator/main.cpp):
+    - Replaced single-char `stdinChar/stdinAvailable` with `std::queue<char>` + mutex
+    - Allows multiple input characters to be buffered while UART TX is busy
 
 ### Verification Results
 
@@ -74,8 +84,9 @@
 - **End-to-end counter program**: ✓ counter.asm loads, loops, counts R3 1..9, BLT branch, resets to 0
 - **C99 Compiler (cc.py)**: ✓ Compiles C programs to RISC assembly, with peephole optimizer and runtime lib (mul/div/mod)
 - **Assembler (asm.py)**: ✓ `JMP label` pseudo-op emits `LDI R4,#label; JMP R4` (3 words) to avoid ±32-word branch limit
+- **UART program (fib_uart.c)**: ✓ Compiles via cc.py, runs via `make test-fib-uart` with piped input
 
-#### ISA Coverage (14 test programs, all pass via `make test-programs`)
+#### ISA Coverage (24 test programs, all pass via `make test-programs`)
 
 | Opcode | Mnemonic | Test |
 |--------|----------|------|

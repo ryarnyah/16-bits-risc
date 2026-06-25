@@ -1370,25 +1370,28 @@ class CGen:
         elif isinstance(s, Block):
             self._gen_block(s, fn, bl, cl)
 
-    def _gen_if(self, s, fn, bl, cl):
+    def _gen_if(self, s, fn, bl, cl, outer_end=None):
         e = self.L('el')
-        end = self.L('ei')
+        end = outer_end if outer_end else self.L('ei')
         self._gen_cond(s.cond, e, True)
         self._gen_stmt(s.then, fn, bl, cl)
         if s.els:
             self.emit(f'    JMP {end}')
         self.emit_lbl(e)
         if s.els:
-            self._gen_stmt(s.els, fn, bl, cl)
+            if isinstance(s.els, IfStmt):
+                self._gen_if(s.els, fn, bl, cl, end)
+            else:
+                self._gen_stmt(s.els, fn, bl, cl)
+        if not outer_end:
             self.emit_lbl(end)
 
     def _gen_cond(self, cond, target, invert):
         """Jump to target when condition is false (invert=True) or true (invert=False)."""
         cv = self._const_val(cond)
         if cv is not None:
-            if (cv and not invert) or (not cv and invert):
-                pass
-            else:
+            cv_bool = bool(cv)
+            if cv_bool != invert:
                 self.emit(f'    JMP {target}')
             return
 
@@ -1410,9 +1413,12 @@ class CGen:
             if op == TOK_LOR:
                 if invert:
                     m = self.L('lo')
-                    self._gen_cond(cond.left, m, False)
-                    self._gen_cond(cond.right, target, False)
+                    end = self.L('lor')
+                    self._gen_cond(cond.left, m, True)
+                    self.emit(f'    JMP {end}')
                     self.emit_lbl(m)
+                    self._gen_cond(cond.right, target, True)
+                    self.emit_lbl(end)
                 else:
                     m = self.L('lo')
                     self._gen_cond(cond.left, m, False)
@@ -1474,11 +1480,6 @@ class CGen:
                     self.emit_lbl(m)
                 else:
                     self.emit(f'    BLT R2, R1, {target}')  # jump when left < right (false)
-                if invert:
-                    self.emit(f'    JMP {target}')
-                else:
-                    self.emit(f'    JMP {m}')
-                self.emit_lbl(m)
                 return
             return
 

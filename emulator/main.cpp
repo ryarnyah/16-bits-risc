@@ -8,6 +8,9 @@
 #include <string>
 #include <thread>
 #include <atomic>
+#include <mutex>
+#include <queue>
+#include <condition_variable>
 #include <unistd.h>
 #include "VSoc.h"
 #include "VSoc___024root.h"
@@ -42,27 +45,32 @@ class Emulator {
     // stdin reader thread
     std::thread stdinThread;
     std::atomic<bool> stdinRunning;
-    std::atomic<char> stdinChar;
-    std::atomic<bool> stdinAvailable;
+    std::mutex stdinMutex;
+    std::queue<char> stdinQueue;
+    std::condition_variable stdinCond;
 
     static void stdinReader(std::atomic<bool>* running,
-                            std::atomic<char>* ch,
-                            std::atomic<bool>* avail) {
+                            std::mutex* mtx,
+                            std::queue<char>* queue,
+                            std::condition_variable* cond) {
         char c;
+        std::cerr << "[DBG] stdinReader started\n";
         while (*running) {
             if (read(STDIN_FILENO, &c, 1) > 0) {
-                while (*avail) std::this_thread::yield();
-                *ch = c;
-                *avail = true;
+                std::cerr << "[DBG] stdinReader read: " << (int)c << " '" << c << "'\n";
+                std::lock_guard<std::mutex> lock(*mtx);
+                queue->push(c);
+                cond->notify_one();
             }
         }
+        std::cerr << "[DBG] stdinReader exiting\n";
     }
 
 public:
     Emulator(bool vcd = true, bool enableStdin = false) : soc(new VSoc), tfp(nullptr), cycle(0),
         traceOn(vcd), txState(0), txCnt(0), prevTx(true),
         rxState(0), rxCnt(0), rxHasData(false),
-        stdinRunning(true), stdinAvailable(false) {
+        stdinRunning(true) {
         if (traceOn) {
             Verilated::traceEverOn(true);
             tfp = new VerilatedVcdC;
@@ -70,7 +78,7 @@ public:
             tfp->open("sim.vcd");
         }
         if (enableStdin) {
-            stdinThread = std::thread(stdinReader, &stdinRunning, &stdinChar, &stdinAvailable);
+            stdinThread = std::thread(stdinReader, &stdinRunning, &stdinMutex, &stdinQueue, &stdinCond);
         }
         reset();
     }
@@ -146,8 +154,19 @@ public:
 
     void driveRx() {
         if (!rxHasData) {
-            if (stdinAvailable.exchange(false)) {
-                rxByte = (u8)stdinChar.load();
+            char c = 0;
+            bool hasChar = false;
+            {
+                std::lock_guard<std::mutex> lock(stdinMutex);
+                if (!stdinQueue.empty()) {
+                    c = stdinQueue.front();
+                    stdinQueue.pop();
+                    hasChar = true;
+                    std::cerr << "[UART RX] Popped char: " << (int)c << " ('" << (c >= 32 && c < 127 ? c : '?') << "') queue size=" << stdinQueue.size() << "\n";
+                }
+            }
+            if (hasChar) {
+                rxByte = (u8)c;
                 rxState = 1;
                 rxCnt = 0;
                 rxHasData = true;
@@ -219,6 +238,10 @@ public:
         return soc->rootp->Soc__DOT__core_1__DOT__PC;
     }
 
+    u64 readCycle() {
+        return cycle;
+    }
+
     u16 readReg(int idx) {
         switch (idx) {
             case 0: return soc->rootp->Soc__DOT__core_1__DOT__regFile_1__DOT__regs_0;
@@ -271,10 +294,24 @@ int main(int argc, char** argv) {
     if (uartMode && hexFile) {
         // Continuous UART mode
         std::cout << "UART mode: running Soc, I/O via stdin/stdout\n";
+        int chunk = 0;
+        std::cerr << "[DBG] Starting UART loop\n";
         while (true) {
             emu.run(1000);  // run in chunks
-            if (Verilated::gotFinish()) break;
+            chunk++;
+            if (chunk % 10 == 0) {
+                std::cerr << "[DBG] chunk=" << chunk << " PC=0x" << std::hex << emu.readPC() << std::dec << " cycles=" << emu.readCycle() << "\n";
+            }
+            if (Verilated::gotFinish()) {
+                std::cerr << "[DBG] Verilated::gotFinish()=true at chunk=" << chunk << " PC=0x" << std::hex << emu.readPC() << std::dec << "\n";
+                break;
+            }
+            if (chunk > 10000) {
+                std::cerr << "[DBG] Chunk limit reached\n";
+                break;
+            }
         }
+        std::cerr << "[DBG] Exiting UART loop\n";
         return 0;
     }
 

@@ -78,12 +78,20 @@ C_TESTS := minimal multest test fib dec double mulonly \
            collatz div_test mod_test sum fib5 fact gcd prime_cnt fib15 \
            mod_simple mod_simple2
 
-test-programs: emulator
+test-programs: emulator fib_uart
 	@for t in $(C_TESTS); do \
 		echo "  cc examples/$$t.c -> examples/$$t.hex"; \
 		python3 cc.py examples/$$t.c --hex examples/$$t.hex || exit 1; \
 	done
 	python3 run_tests.py
+
+fib_uart: examples/fib_uart.hex
+
+examples/fib_uart.hex: examples/fib_uart.c cc.py asm.py
+	python3 cc.py examples/fib_uart.c --hex examples/fib_uart.hex
+
+test-fib-uart: emulator fib_uart
+	echo -e "3\n5\n9\n" | timeout 15s $(BUILD_DIR)/emulator --uart examples/fib_uart.hex
 
 test-programs-clean:
 	rm -f examples/or_test.{asm,hex} examples/bne_test.{asm,hex} \
@@ -94,7 +102,8 @@ test-programs-clean:
 	      examples/fib5.{asm,hex} examples/fact.{asm,hex} \
 	      examples/gcd.{asm,hex} examples/prime_cnt.{asm,hex} \
 	      examples/fib15.{asm,hex} examples/mod_simple.{asm,hex} \
-	      examples/mod_simple2.{asm,hex}
+	      examples/mod_simple2.{asm,hex} \
+	      examples/fib_uart.{asm,hex}
 
 # ======================================================================
 # F4PGA — Basys3 (Artix-7 XC7A35T) FPGA implementation

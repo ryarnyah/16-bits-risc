@@ -30,6 +30,7 @@ fib:
     LD R1, [R6 -2]
     JMP fib_epi
 .el1:
+.ei2:
     LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
