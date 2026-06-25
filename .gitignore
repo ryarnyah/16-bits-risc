@@ -6,6 +6,7 @@ emulator/build/
 simWorkspace/
 sim.vcd
 .metals
+__pycache__
 
 # F4PGA build outputs
 f4pga/build/
