@@ -1,7 +1,10 @@
 SHELL := /bin/bash
-EMU_DIR := emulator
-BUILD_DIR := $(EMU_DIR)/build
-TARGET_DIR := target/gen
+EMU_DIR      := emulator
+BUILD_DIR    := $(EMU_DIR)/build
+TARGET_DIR   := target/gen
+
+EMULATOR      = $(BUILD_DIR)/obj_dir/emulator
+EMULATOR_PIPSOC = $(BUILD_DIR)/obj_dir/pipsoc-emu
 HEX_DIR := examples
 
 SBT := sbt
@@ -10,11 +13,12 @@ VERILATOR_BIN := $(shell readlink -f $$(which $(VERILATOR)))
 VERILATOR_ROOT := $(dir $(VERILATOR_BIN))../share/verilator
 VERILATOR_INC := $(VERILATOR_ROOT)/include
 
-.PHONY: all help rtl formal emulator test test-programs clean assemble \
+.PHONY: all help rtl formal emulator emulator-pipsoc test test-programs \
+        test-programs-pipsoc test-programs-all clean assemble \
         examples/prime.hex examples/echo.hex uart \
         f4pga f4pga_program vendor-f4pga
 
-all: rtl formal emulator
+all: rtl formal emulator emulator-pipsoc
 
 help:
 	@echo "Targets:"
@@ -23,7 +27,9 @@ help:
 	@echo "  formal               - Run formal verification (BMC 50)"
 	@echo "  emulator             - Build Verilator emulator"
 	@echo "  test                 - Run sbt unit tests"
-	@echo "  test-programs        - Compile & run all C test programs via emulator"
+	@echo "  test-programs        - Compile & run all C tests via old Soc emulator"
+	@echo "  test-programs-pipsoc - Compile & run all C tests via PipSoc emulator"
+	@echo "  test-programs-all    - Run both emulators and compare results"
 	@echo "  assemble             - Assemble all .asm files in examples/"
 	@echo "  uart                 - Run UART echo demo"
 	@echo "  vendor-f4pga         - Install F4PGA toolchain into vendor/"
@@ -56,6 +62,12 @@ emulator: $(TARGET_DIR)/Soc.sv
 $(TARGET_DIR)/Soc.sv: $(shell find src/main -name '*.scala')
 	$(SBT) "runMain risc.Soc"
 
+$(TARGET_DIR)/PipSoc.sv: $(shell find src/main -name '*.scala')
+	$(SBT) "runMain risc.PipSoc"
+
+emulator-pipsoc: $(TARGET_DIR)/PipSoc.sv
+	$(MAKE) -C $(EMU_DIR) -f Makefile.pipsoc all
+
 test:
 	$(SBT) test
 
@@ -83,7 +95,26 @@ test-programs: emulator fib_uart
 		echo "  cc examples/$$t.c -> examples/$$t.hex"; \
 		python3 cc.py examples/$$t.c --hex examples/$$t.hex || exit 1; \
 	done
-	python3 run_tests.py
+	python3 run_tests.py --emulator $(EMULATOR)
+
+test-programs-pipsoc: emulator-pipsoc fib_uart
+	@for t in $(C_TESTS); do \
+		echo "  cc examples/$$t.c -> examples/$$t.hex"; \
+		python3 cc.py examples/$$t.c --hex examples/$$t.hex || exit 1; \
+	done
+	python3 run_tests.py --emulator $(EMULATOR_PIPSOC)
+
+test-programs-all: emulator emulator-pipsoc fib_uart
+	@for t in $(C_TESTS); do \
+		echo "  cc examples/$$t.c -> examples/$$t.hex"; \
+		python3 cc.py examples/$$t.c --hex examples/$$t.hex || exit 1; \
+	done
+	@echo ""
+	@echo "===== Old Soc Emulator ====="
+	python3 run_tests.py --emulator $(EMULATOR) || true
+	@echo ""
+	@echo "===== PipSoc Emulator ====="
+	python3 run_tests.py --emulator $(EMULATOR_PIPSOC) || true
 
 fib_uart: examples/fib_uart.hex
 

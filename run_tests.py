@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-import subprocess, sys, os, re
+import subprocess, sys, os, re, argparse
 
-BUILD_DIR = 'emulator/build'
-EMULATOR = os.path.join(BUILD_DIR, 'emulator')
+BUILD_DIR = 'emulator/build/obj_dir'
+DEFAULT_EMULATOR = os.path.join(BUILD_DIR, 'emulator')
 CC = sys.executable + ' cc.py'
 
 TESTS = [
@@ -40,14 +40,14 @@ def compile_c(c_file):
     r = subprocess.run([sys.executable, 'cc.py', c_path, '--hex', hex_path],
         capture_output=True, text=True)
     if r.returncode != 0:
-        print(f'COMPILE FAIL: {c_file}\n{r.stderr}')
+        print(f'COMPILE FAIL\n{r.stderr}')
         return False
     return True
 
-def run_hex(name, hex_file, steps=20000):
+def run_hex(emulator, hex_file, steps=20000):
     hex_path = os.path.join('examples', hex_file)
     input_str = f's {steps}\nr 1\nq\n'
-    r = subprocess.run([EMULATOR, hex_path], input=input_str,
+    r = subprocess.run([emulator, hex_path], input=input_str,
         capture_output=True, text=True, timeout=30)
     for line in r.stdout.split('\n'):
         m = re.search(r'R1 = 0x([0-9A-Fa-f]+)', line)
@@ -57,6 +57,20 @@ def run_hex(name, hex_file, steps=20000):
     return None
 
 def main():
+    parser = argparse.ArgumentParser(description='Run C test programs on RISC emulator')
+    parser.add_argument('--emulator', '-e',
+        default=DEFAULT_EMULATOR,
+        help=f'Emulator binary path (default: {DEFAULT_EMULATOR})')
+    args = parser.parse_args()
+
+    emulator = os.path.abspath(args.emulator)
+
+    if not os.path.exists(emulator):
+        print(f'ERROR: emulator not found at: {emulator}')
+        print('Build it first with: make emulator  (old Soc)')
+        print('  or: make -C emulator -f Makefile.pipsoc  (new PipSoc)')
+        return 1
+
     failures = 0
     passed = 0
     for entry in TESTS:
@@ -69,7 +83,7 @@ def main():
             print('COMPILE FAIL')
             failures += 1
             continue
-        result = run_hex(c_file, hex_file, steps)
+        result = run_hex(emulator, hex_file, steps)
         if result is None:
             print('RUN FAIL')
             failures += 1

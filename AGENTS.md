@@ -12,6 +12,9 @@
 - [x] LD bug fix: write `dataLoad` to register file instead of stale `aluRes`
 - [x] Emulator (emulator/main.cpp) — Verilator compiles VCore, emulator binary works
 - [x] Emulator end-to-end test: counter.asm loads and loops correctly (R3 1..9, BLT branch, reset to 0)
+- [x] PipCore load-use hazard fix: ID→EX gated by `!stallId` (includes hazard stall, not just bus stall), `loadUseWb` covers phase 0 (waiting for bus data)
+- [x] PipCore formal: BMC(30) passes
+- [x] PipCore LD/ST end-to-end: ldst_test.asm (LDI→ST→LD→SUB) passes, R3=0
 
 ### Design Decisions
 
@@ -76,15 +79,31 @@
     - Replaced single-char `stdinChar/stdinAvailable` with `std::queue<char>` + mutex
     - Allows multiple input characters to be buffered while UART TX is busy
 
+12. **PipCore load-use hazard fix — deadlock fix** (PipCore.scala):
+    - Root cause: ID→EX transfer was gated by `!stallEx` (bus stalls only), not `!stallId` (which includes load-use hazard stalls). When a LD in EX had SUB in ID needing the loaded register, SUB entered EX with stale regfile value before the LD data was available via the bus.
+    - Fix 1: Changed ID→EX transfer condition from `!stallEx` to `!stallId` so load-use hazards stall the ID stage
+    - Fix 2: Changed `loadUseWb` from covering phases 1-2 (data already available via forwarding) to phase 0 (waiting for data from bus), where forwarding can't help
+    - Bug introduced by Fix 1: `ldUseStall` in `stallId` blocked ID→EX, but `EX→WB` still fired (on `!stallWb`), transferring the stale LD to WB. When the LD finished (`ldActive` went 0), `loadUseEx` re-detected the stale `exVld=1, exIsLD=1`, and `EX→WB` immediately re-entered `ldActive` — no pending bus response, state machine stuck at phase 0 forever, all regfile writes gated by `ldActive=1`.
+    - Fix 3 (exServiced): Added `exServiced` register (set by EX→WB, cleared by ID→EX). Used as `!exServiced` guard in both `loadUseEx` and the `ldActive` trigger. Prevents stale EX from re-entering the LD state machine or re-triggering hazard detection after its instruction has already left EX.
+    - Verified: formal BMC(30) passes, ldst_test.asm shows R3=0 (R2-R1=42-42), data init loop no longer deadlocks
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully
 - **Formal Verification**: ✓ All 5 components pass at BMC(30): Core, ALU, Decoder, RegFile, BusInterface
+- **PipCore Formal Verification**: ✓ PipCore passes BMC(30)
 - **Verilator Emulator**: ✓ Compiles and runs, responds to bus commands (LOAD_ADDR, LOAD_DATA, STEP, RUN, READ_REG, READ_MEM, READ_PC)
 - **End-to-end counter program**: ✓ counter.asm loads, loops, counts R3 1..9, BLT branch, resets to 0
 - **C99 Compiler (cc.py)**: ✓ Compiles C programs to RISC assembly, with peephole optimizer and runtime lib (mul/div/mod)
 - **Assembler (asm.py)**: ✓ `JMP label` pseudo-op emits `LDI R4,#label; JMP R4` (3 words) to avoid ±32-word branch limit
 - **UART program (fib_uart.c)**: ✓ Compiles via cc.py, runs via `make test-fib-uart` with piped input
+
+### PipCore Verification
+
+- **PipSoc Emulator**: ✓ Compiles and runs (pipsoc-emu), separate emulator using PipSoc Verilog
+- **PipCore Formal Verification**: ✓ PipCore passes BMC(30)
+- **End-to-end LD/ST test**: ✓ ldst_test.asm: LDI 42, ST to mem, LD to R2, SUB R2-R1→R3, BEQ loop — R3=0 (correct: 42-42=0)
+- **C compiled tests on PipSoc**: 5/24 pass (minimal, mulonly, xori_test, div_test, fib5) — **pre-existing failures** (PipCore was always broken for C tests; old multi-cycle Core passes all 24)
 
 #### ISA Coverage (24 test programs, all pass via `make test-programs`)
 

@@ -1,0 +1,23 @@
+CORE_DIR   = $(abspath ../target/gen)
+BUILD_DIR  = $(abspath ./build)
+EMULATOR   = $(BUILD_DIR)/obj_dir/pipsoc-emu
+VSOC_SV    = $(CORE_DIR)/PipSoc.sv
+MAIN_CPP   = $(abspath ./main_pipsoc.cpp)
+VERILATOR  = verilator
+VERILATOR_FLAGS = --cc --trace -Wall -Wno-DECLFILENAME -Wno-UNUSED -Wno-UNOPTFLAT -Wno-WIDTH -Wno-CASEINCOMPLETE -Wno-PINCONNECTEMPTY -Wno-UNDRIVEN -CFLAGS "-std=c++17 -O2" -O1 --top-module PipSoc
+
+all: $(EMULATOR)
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)/obj_dir
+
+$(EMULATOR): $(VSOC_SV) main_pipsoc.cpp | $(BUILD_DIR)
+	cd $(BUILD_DIR) && $(VERILATOR) $(VERILATOR_FLAGS) --build --exe $(VSOC_SV) $(MAIN_CPP) -o pipsoc-emu
+
+run: $(EMULATOR)
+	$(EMULATOR) $(PROG)
+
+clean:
+	rm -rf $(BUILD_DIR)
+
+.PHONY: all run clean
