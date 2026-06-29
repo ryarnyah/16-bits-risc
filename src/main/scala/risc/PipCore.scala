@@ -154,7 +154,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val ldRd = Reg(UInt(3 bits))
 
   // stallWb defined here (before ldActive/ldRd setting) to break circular dep
-  val stallWb = ldActive && (wbLdPhase === 1 || wbLdPhase === 2)
+  private val stallWb = ldActive && (wbLdPhase === 1 || wbLdPhase === 2)
 
   // Tracks whether the current EX instruction has been transferred to WB.
   // Set by EX→WB, cleared by ID→EX. Prevents stale EX from re-entering
@@ -195,16 +195,16 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // loop when exVld=0 (bubble).  The prevWb* tier handles the case where
   // the current wbResult was overwritten by a back-to-back WB write
   // (e.g. LDI → LD) before EX could read it in the previous cycle.
-  val memWbLdDataAvail = ldActive && ldRd =/= 0 && (io.dataBus.rsp.fire || wbLdPhase === 1 || wbLdPhase === 2)
-  val memWbLdData = Mux(io.dataBus.rsp.fire, io.dataBus.rsp.payload, wbLdData)
-  val exFwdRsVal = Mux(memWbLdDataAvail && ldRd === exRsAddr,
+  private val memWbLdDataAvail = ldActive && ldRd =/= 0 && (io.dataBus.rsp.fire || wbLdPhase === 1 || wbLdPhase === 2)
+  private val memWbLdData = Mux(io.dataBus.rsp.fire, io.dataBus.rsp.payload, wbLdData)
+  private val exFwdRsVal = Mux(memWbLdDataAvail && ldRd === exRsAddr,
                     memWbLdData,
                     Mux(exVld && wbHasRd && wbRd =/= 0 && wbRd === exRsAddr && !ldActive,
                         wbResult,
                     Mux(exVld && prevWbHasRd && prevWbRd =/= 0 && prevWbRd === exRsAddr,
                         prevWbResult,
                         exRsVal)))
-  val exFwdRtVal = Mux(memWbLdDataAvail && ldRd === exRtAddr,
+  private val exFwdRtVal = Mux(memWbLdDataAvail && ldRd === exRtAddr,
                     memWbLdData,
                     Mux(exVld && wbHasRd && wbRd =/= 0 && wbRd === exRtAddr && !ldActive,
                         wbResult,
@@ -218,50 +218,50 @@ case class PipCore() extends Component with CoreBusIoComponent {
   alu.io.aluFunc := exAluFunc
 
   // LD/ST effective address (recompute from forwarded values)
-  val exEffAddr2 = (exFwdRsVal.asSInt + exSextVal.asSInt).asBits.resized
+  private val exEffAddr2 = (exFwdRsVal.asSInt + exSextVal.asSInt).asBits.resized
 
   // Branch condition evaluation
-  val exBrTaken = (exIsJMP ||
+  private val exBrTaken = (exIsJMP ||
     (exIsBEQ && (exFwdRsVal === exFwdRtVal)) ||
     (exIsBNE && (exFwdRsVal =/= exFwdRtVal)) ||
     (exIsBLT && (exFwdRsVal.asSInt < exFwdRtVal.asSInt))) && exVld
 
   // Branch/JMP redirect target
-  val exBrShifted = exSextVal(14 downto 0) ## B"0"
-  val exBrTarget2 = (exPc.asSInt + 2 + exBrShifted.asSInt).asBits.resized
-  val exJmpTarget = exFwdRsVal.asUInt
+  private val exBrShifted = exSextVal(14 downto 0) ## B"0"
+  private val exBrTarget2 = (exPc.asSInt + 2 + exBrShifted.asSInt).asBits.resized
+  private val exJmpTarget = exFwdRsVal.asUInt
 
-  val exBranchTaken = exBrTaken
+  private val exBranchTaken = exBrTaken
 
   // =========================================================================
   // Stall Logic
   // =========================================================================
 
   // EX stalls when WB stalled, or EX has unserviced LD/ST
-  val stallEx = stallWb ||
+  private val stallEx = stallWb ||
                 (exVld && exIsLD && !io.dataBus.req.fire) ||
                 (exVld && exIsST && !io.dataBus.req.fire)
 
   // Load-use hazard: ID needs a register that EX or WB is loading
-  val idUsesRs = !decoder.io.isLDI && idVld
-  val idUsesRt = (decoder.io.isALU || decoder.io.isST || decoder.io.isBranch) && idVld
+  private val idUsesRs = !decoder.io.isLDI && idVld
+  private val idUsesRt = (decoder.io.isALU || decoder.io.isST || decoder.io.isBranch) && idVld
 
   // Only detect load-use hazard when LD is genuinely in EX, not after
   // it's already been transferred to WB (exServiced=1 means EX→WB fired,
   // so the exVld/exIsLD values are stale). Without this guard, the stale
   // LD in EX would cause a deadlock: loadUseEx blocks ID→EX forever
   // because nothing clears exVld, and EX→WB re-enters the LD state machine.
-  val loadUseEx = exVld && exIsLD && exHasRd && exRd =/= 0 &&
+  private val loadUseEx = exVld && exIsLD && exHasRd && exRd =/= 0 &&
     !exServiced &&
     ((idUsesRs && idRsAddr === exRd) || (idUsesRt && idRtAddr === exRd))
 
-  val loadUseWb = ldActive && wbLdPhase === 0 && ldRd =/= 0 &&
+  private val loadUseWb = ldActive && wbLdPhase === 0 && ldRd =/= 0 &&
     ((idUsesRs && idRsAddr === ldRd) || (idUsesRt && idRtAddr === ldRd))
 
-  val ldUseStall = loadUseEx || loadUseWb
+  private val ldUseStall = loadUseEx || loadUseWb
 
-  val stallId = ldUseStall || stallEx
-  val stallIf = stallId
+  private val stallId = ldUseStall || stallEx
+  private val stallIf = stallId
 
   // Gate instruction fetch — external ready signal used for IF stall gating
   io.instrRsp.ready := !stallIf && pipelineActive
@@ -334,7 +334,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // =========================================================================
 
   // Non-LD result (used by both EX→WB and regfile non-LD write)
-  val nonLdResult = Mux(exIsLDI, exLdiData,
+  private val nonLdResult = Mux(exIsLDI, exLdiData,
                     Mux(exIsALU || exIsImmEn, alu.io.result, B(0, 16 bits)))
 
   // EX → WB
