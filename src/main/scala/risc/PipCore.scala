@@ -154,8 +154,11 @@ case class PipCore() extends Component with CoreBusIoComponent {
       }
     }
     is(LdPhase.DATA_READY) {
-      when(rEX_type === InstrType.LD && io.dataBus.req.fire) {
-        ldRd := rEX_rd
+      // A NEW LD entering EX from ID starts a new transaction; the LD just
+      // completed (still showing rEX_type === LD) must NOT fire another
+      // request — req.valid is gated by !ldRspPending for LD (see below).
+      when(vID && decoder.io.isLD) {
+        ldRd := decoder.io.rdField.asUInt
         ldState := LdPhase.WAIT_BUS
       } otherwise {
         ldState := LdPhase.IDLE
@@ -259,11 +262,18 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val exResult = Mux(rEX_type === InstrType.LDI, rEX_ldiData,
     Mux(rEX_type === InstrType.ALU || exIsImmEn, alu.io.result, B(0, 16 bits)))
 
-  // Data bus request (combinational)
+  // Data bus request (combinational).
+  // Gate LD req.valid with !ldRspPending (DATA_READY) to prevent the cycle
+  // after a LD completes from generating a spurious request.  The LD that
+  // just finished still shows rEX_type === LD (before ID→EX updates it),
+  // and the request would fire with the same addr — harmless in isolation,
+  // but the unconsumed response pollutes the bus and gets consumed by the
+  // next LD, loading stale data from the wrong address.
   io.dataBus.req.payload.addr := rEX_effAddr.asUInt
   io.dataBus.req.payload.wrData := exFwdRtVal
   io.dataBus.req.payload.wr := rEX_type === InstrType.ST
-  io.dataBus.req.valid := rEX_type === InstrType.LD || rEX_type === InstrType.ST
+  io.dataBus.req.valid :=
+    (rEX_type === InstrType.LD && !ldRspPending) || rEX_type === InstrType.ST
 
   // =========================================================================
   // EX → WB Transfer — MUST come BEFORE ID→EX so it sees the OLD rEX_* values
@@ -444,7 +454,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
       assert(io.dataBus.req.valid)
       assert(io.dataBus.req.payload.wr)
     }
-    when(rEX_type === InstrType.LD) {
+    // LD req.valid is gated by !ldRspPending (see data bus request logic)
+    when(rEX_type === InstrType.LD && !ldRspPending) {
       assert(io.dataBus.req.valid)
       assert(!io.dataBus.req.payload.wr)
     }
@@ -480,7 +491,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     // ======================================================================
     // LD state machine properties
     // ======================================================================
-    when(rEX_type === InstrType.LD) { assert(io.dataBus.req.valid) }
+    when(rEX_type === InstrType.LD && !ldRspPending) { assert(io.dataBus.req.valid) }
 
     // ldData captures the payload when bus response fires
     when(pastValid() && resetn) {
@@ -523,7 +534,9 @@ case class PipCore() extends Component with CoreBusIoComponent {
     }
 
     // == LD (ISA §3.3 / §4.9): data bus read request with correct address  ==
-    when(rEX_type === InstrType.LD) {
+    // req.valid is gated by !ldRspPending to prevent spurious request in
+    // the DATA_READY cycle (see data bus request logic for rationale).
+    when(rEX_type === InstrType.LD && !ldRspPending) {
       assert(io.dataBus.req.valid)
       assert(!io.dataBus.req.payload.wr)
       assert(io.dataBus.req.payload.addr === rEX_effAddr.asUInt)
