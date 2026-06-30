@@ -214,109 +214,84 @@ public:
     }
 
     void dumpPipe() {
-        auto exVld = soc->rootp->PipSoc__DOT__core__DOT__exVld;
-        auto stallEx = soc->rootp->PipSoc__DOT__core__DOT__stallId;
-        auto stallWb = soc->rootp->PipSoc__DOT__core__DOT__stallWb;
-        auto stallId = soc->rootp->PipSoc__DOT__core__DOT__stallId;
-        auto exIsST = soc->rootp->PipSoc__DOT__core__DOT__exIsST;
-        auto exIsLD = soc->rootp->PipSoc__DOT__core__DOT__exIsLD;
-        auto ldActive = soc->rootp->PipSoc__DOT__core__DOT__ldActive;
-        auto ldRd = soc->rootp->PipSoc__DOT__core__DOT__ldRd;
-        auto ifVld = soc->rootp->PipSoc__DOT__core__DOT__ifVld;
-        auto idVld = soc->rootp->PipSoc__DOT__core__DOT__idVld;
-        auto exHasRd = soc->rootp->PipSoc__DOT__core__DOT__exHasRd;
-        auto exRd = soc->rootp->PipSoc__DOT__core__DOT__exRd;
-        auto wbRd = soc->rootp->PipSoc__DOT__core__DOT__wbRd;
         auto pc_ = soc->rootp->PipSoc__DOT__core__DOT__pc;
         auto dbgState = soc->io_dbgState;
         auto reqFire = soc->rootp->PipSoc__DOT__io_dataBus_req_fire;
         auto rspFire = soc->rootp->PipSoc__DOT__io_dataBus_rsp_fire;
-        auto addr = soc->rootp->PipSoc__DOT__core_io_dataBus_req_payload_addr;
-        auto ifLdiHeader = soc->rootp->PipSoc__DOT__core__DOT__ifLdiHeader;
-        auto ifLdiData = soc->rootp->PipSoc__DOT__core__DOT__ifLdiData;
-        auto ifInstr = soc->rootp->PipSoc__DOT__core__DOT__ifInstr;
-        auto ifPc = soc->rootp->PipSoc__DOT__core__DOT__ifPc;
-        auto idInstr = soc->rootp->PipSoc__DOT__core__DOT__idInstr;
-        auto idPc = soc->rootp->PipSoc__DOT__core__DOT__idPc;
-        auto idLdiData = soc->rootp->PipSoc__DOT__core__DOT__idLdiData;
-        auto exInstr = soc->rootp->PipSoc__DOT__core__DOT__exInstr;
-        auto exPc = soc->rootp->PipSoc__DOT__core__DOT__exPc;
-        auto exLdiData = soc->rootp->PipSoc__DOT__core__DOT__exLdiData;
-        auto wbResult = soc->rootp->PipSoc__DOT__core__DOT__wbResult;
+        auto rEX_type = soc->rootp->PipSoc__DOT__core__DOT__rEX_type;
+        auto ldState = soc->rootp->PipSoc__DOT__core__DOT__ldState;
+        auto exVld = rEX_type != 0;
+        auto exIsLD = rEX_type == 2;
+        auto exIsST = rEX_type == 3;
+        auto ldActive = ldState == 1 || ldState == 2;
+        auto vID = soc->rootp->PipSoc__DOT__core__DOT__vID;
+        auto stallID = soc->rootp->PipSoc__DOT__core__DOT__stallID;
+        auto rEX_hasRd = soc->rootp->PipSoc__DOT__core__DOT__rEX_hasRd;
+        auto rEX_rd = soc->rootp->PipSoc__DOT__core__DOT__rEX_rd;
+        auto rWB_rd = soc->rootp->PipSoc__DOT__core__DOT__rWB_rd;
+        auto ldRd = soc->rootp->PipSoc__DOT__core__DOT__ldRd;
+        auto rID_instr = soc->rootp->PipSoc__DOT__core__DOT__rID_instr;
+        auto rID_pc = soc->rootp->PipSoc__DOT__core__DOT__rID_pc;
+        auto rID_ldiData = soc->rootp->PipSoc__DOT__core__DOT__rID_ldiData;
+        auto ldiHeader = soc->rootp->PipSoc__DOT__core__DOT__ldiHeader;
+        auto rEX_instr = soc->rootp->PipSoc__DOT__core__DOT__rEX_instr;
+        auto rEX_ldiData = soc->rootp->PipSoc__DOT__core__DOT__rEX_ldiData;
+        auto rWB_result = soc->rootp->PipSoc__DOT__core__DOT__rWB_result;
+        auto rWB_hasRd = soc->rootp->PipSoc__DOT__core__DOT__rWB_hasRd;
         printf("--- Pipeline Dump ---\n");
-        printf("PC=%04x exVld=%d exIsLD=%d exIsST=%d ldActive=%d ifVld=%d idVld=%d\n",
-            pc_, exVld, exIsLD, exIsST, ldActive, ifVld, idVld);
-        printf("stallEx=%d stallWb=%d stallId=%d exHasRd=%d exRd=%d wbRd=%d ldRd=%d\n",
-            stallEx, stallWb, stallId, exHasRd, exRd, wbRd, ldRd);
-        printf("state=%d reqFire=%d rspFire=%d addr=%04x\n",
-            dbgState, reqFire, rspFire, addr);
-        printf("IF: vld=%d pc=%04x instr=%04x hdr=%04x data=%04x\n",
-            ifVld, ifPc, ifInstr, ifLdiHeader, ifLdiData);
-        printf("ID: vld=%d pc=%04x instr=%04x data=%04x\n",
-            idVld, idPc, idInstr, idLdiData);
-        printf("EX: vld=%d pc=%04x instr=%04x data=%04x\n",
-            exVld, exPc, exInstr, exLdiData);
-        printf("WB: res=%04x wbRd=%d wbHasRd=%d ldActive=%d\n", wbResult,
-            soc->rootp->PipSoc__DOT__core__DOT__wbRd,
-            soc->rootp->PipSoc__DOT__core__DOT__wbHasRd,
-            soc->rootp->PipSoc__DOT__core__DOT__ldActive);
-        printf("  stallWb=%d stallEx=%d stallId=%d wbLdPhase=%d\n",
-            soc->rootp->PipSoc__DOT__core__DOT__stallWb,
-            soc->rootp->PipSoc__DOT__core__DOT__stallId,
-            soc->rootp->PipSoc__DOT__core__DOT__stallId,
-            soc->rootp->PipSoc__DOT__core__DOT__wbLdPhase);
+        printf("PC=%04x rEX_type=%d isLD=%d isST=%d ldActive=%d(ldState=%d) vID=%d stallID=%d\n",
+            pc_, (int)rEX_type, exIsLD, exIsST, ldActive, (int)ldState, vID, stallID);
+        printf("rEX_hasRd=%d rEX_rd=%d rWB_rd=%d ldRd=%d\n",
+            rEX_hasRd, rEX_rd, rWB_rd, ldRd);
+        printf("state=%d reqFire=%d rspFire=%d\n", dbgState, reqFire, rspFire);
+        printf("ID: pc=%04x instr=%04x ldiData=%04x ldiHdr=%04x\n",
+            rID_pc, rID_instr, rID_ldiData, ldiHeader);
+        printf("EX: type=%d instr=%04x ldiData=%04x\n",
+            (int)rEX_type, rEX_instr, rEX_ldiData);
+        printf("WB: res=%04x rd=%d hasRd=%d\n", rWB_result, rWB_rd, rWB_hasRd);
     }
 
     // Single-step trace showing pipeline contents per cycle
     void traceStep(int n) {
         for (int i = 0; i < n; i++) {
             tick();
-            auto ifInstr = soc->rootp->PipSoc__DOT__core__DOT__ifInstr;
-            auto ifPc = soc->rootp->PipSoc__DOT__core__DOT__ifPc;
-            auto ifVld = soc->rootp->PipSoc__DOT__core__DOT__ifVld;
-            auto ifLdiHeader = soc->rootp->PipSoc__DOT__core__DOT__ifLdiHeader;
-            auto idInstr = soc->rootp->PipSoc__DOT__core__DOT__idInstr;
-            auto idPc = soc->rootp->PipSoc__DOT__core__DOT__idPc;
-            auto idVld = soc->rootp->PipSoc__DOT__core__DOT__idVld;
-            auto idLdiData = soc->rootp->PipSoc__DOT__core__DOT__idLdiData;
-            auto exInstr = soc->rootp->PipSoc__DOT__core__DOT__exInstr;
-            auto exPc = soc->rootp->PipSoc__DOT__core__DOT__exPc;
-            auto exVld = soc->rootp->PipSoc__DOT__core__DOT__exVld;
-            auto exIsLD = soc->rootp->PipSoc__DOT__core__DOT__exIsLD;
-            auto exIsST = soc->rootp->PipSoc__DOT__core__DOT__exIsST;
-            auto exHasRd = soc->rootp->PipSoc__DOT__core__DOT__exHasRd;
-            auto exRd = soc->rootp->PipSoc__DOT__core__DOT__exRd;
-            auto pc_ = soc->rootp->PipSoc__DOT__core__DOT__pc;
-            // Dump ROM at the current fetch address
-            auto rom0 = soc->rootp->PipSoc__DOT__instrRom[0];
-            auto rom1 = soc->rootp->PipSoc__DOT__instrRom[1];
-            auto rom4 = soc->rootp->PipSoc__DOT__instrRom[4];
-            auto wbRd_ = soc->rootp->PipSoc__DOT__core__DOT__wbRd;
-            auto wbHasRd_ = soc->rootp->PipSoc__DOT__core__DOT__wbHasRd;
-            auto ldActive_ = soc->rootp->PipSoc__DOT__core__DOT__ldActive;
-            auto ldRd_ = soc->rootp->PipSoc__DOT__core__DOT__ldRd;
-            auto wbResult_ = soc->rootp->PipSoc__DOT__core__DOT__wbResult;
-            auto fetchBuf = soc->rootp->PipSoc__DOT__core__DOT__fetchBufData;
-            auto stallWb_ = soc->rootp->PipSoc__DOT__core__DOT__stallWb;
-            auto r2val = soc->rootp->PipSoc__DOT__core__DOT__regFile_1__DOT__regs_2;
-            auto stallEx_ = soc->rootp->PipSoc__DOT__core__DOT__stallId;
-            auto aluRes_ = soc->rootp->PipSoc__DOT__core__DOT__alu_1_io_result;
-            auto exBrTaken_ = soc->rootp->PipSoc__DOT__core__DOT__exBrTaken;
-            auto exRsVal_ = soc->rootp->PipSoc__DOT__core__DOT__exRsVal;
-            auto r6val = soc->rootp->PipSoc__DOT__core__DOT__regFile_1__DOT__regs_6;
+            auto r = soc->rootp;
+            auto rEX_type = r->PipSoc__DOT__core__DOT__rEX_type;
+            auto ldState = r->PipSoc__DOT__core__DOT__ldState;
+            auto exIsLD = rEX_type == 2;
+            auto exIsST = rEX_type == 3;
+            auto exVld = rEX_type != 0;
+            auto ldActive = ldState == 1 || ldState == 2;
+            auto pc_ = r->PipSoc__DOT__core__DOT__pc;
+            auto rID_instr = r->PipSoc__DOT__core__DOT__rID_instr;
+            auto rID_pc = r->PipSoc__DOT__core__DOT__rID_pc;
+            auto rID_ldiData = r->PipSoc__DOT__core__DOT__rID_ldiData;
+            auto ldiHeader = r->PipSoc__DOT__core__DOT__ldiHeader;
+            auto vID = r->PipSoc__DOT__core__DOT__vID;
+            auto rEX_instr = r->PipSoc__DOT__core__DOT__rEX_instr;
+            auto rEX_hasRd = r->PipSoc__DOT__core__DOT__rEX_hasRd;
+            auto rEX_rd = r->PipSoc__DOT__core__DOT__rEX_rd;
+            auto rWB_rd = r->PipSoc__DOT__core__DOT__rWB_rd;
+            auto rWB_hasRd = r->PipSoc__DOT__core__DOT__rWB_hasRd;
+            auto rWB_result = r->PipSoc__DOT__core__DOT__rWB_result;
+            auto stallID = r->PipSoc__DOT__core__DOT__stallID;
+            auto ldRd = r->PipSoc__DOT__core__DOT__ldRd;
+            auto aluRes_ = r->PipSoc__DOT__core__DOT__alu_1_io_result;
+            auto exBrTaken_ = r->PipSoc__DOT__core__DOT__exBrTaken;
+            auto r2val = r->PipSoc__DOT__core__DOT__regFile_1__DOT__regs_2;
+            auto r6val = r->PipSoc__DOT__core__DOT__regFile_1__DOT__regs_6;
             auto rf_r1 = readReg(1);
             auto rf_r2 = readReg(2);
             auto rf_r3 = readReg(3);
             auto rf_r4 = readReg(4);
             auto rf_r6 = readReg(6);
-            printf("[%d] PC=%04x  IF:pc=%04x instr=%04x hdr=%d v=%d  ID:pc=%04x instr=%04x data=%04x v=%d  EX:pc=%04x instr=%04x v=%d isLD=%d isST=%d rd=%d alu=%04x br=%d  WB:rd=%d has=%d ld=%d res=%04x stlWb=%d stlEx=%d  R1=%04x R2=%04x R3=%04x R4=%04x R6=%04x fb=%04x\n",
-                cycle, pc_, ifPc, ifInstr, ifLdiHeader, ifVld,
-                idPc, idInstr, idLdiData, idVld,
-                exPc, exInstr, exVld, exIsLD, exIsST, exRd,
+            printf("[%ld] PC=%04x  ID:pc=%04x instr=%04x ldi=%04x hdr=%04x v=%d  EX:instr=%04x v=%d isLD=%d isST=%d rd=%d alu=%04x br=%d  WB:rd=%d has=%d ld=%d res=%04x stl=%d  R1=%04x R2=%04x R3=%04x R4=%04x R6=%04x fb=%04x\n",
+                (long)cycle, pc_, rID_pc, rID_instr, rID_ldiData, ldiHeader, vID,
+                rEX_instr, exVld, exIsLD, exIsST, rEX_rd,
                 aluRes_, exBrTaken_,
-                wbRd_, wbHasRd_, ldActive_, wbResult_, stallWb_, stallEx_,
+                rWB_rd, rWB_hasRd, ldActive, rWB_result, stallID,
                 rf_r1, rf_r2, rf_r3, rf_r4, rf_r6,
-                fetchBuf);
+                ldiHeader);
         }
         u16 r1_s = readReg(1);
         u16 r2_s = readReg(2);
@@ -331,11 +306,11 @@ public:
     }
 
     u16 readAluRes() {
-        return soc->rootp->PipSoc__DOT__core__DOT__wbResult;
+        return soc->rootp->PipSoc__DOT__core__DOT__rWB_result;
     }
 
     u16 readInstr() {
-        return soc->rootp->PipSoc__DOT__core__DOT__ifInstr;
+        return soc->rootp->PipSoc__DOT__core__DOT__rID_instr;
     }
 
     u16 readPC() {
@@ -364,9 +339,10 @@ public:
         return soc->rootp->PipSoc__DOT__instrRom[addr];
     }
 
-    u16 readDataMem(u16 addr) {
-        return soc->rootp->PipSoc__DOT__dataRam[addr];
-    }
+u16 readDataMem(u16 addr) {
+    u16 wordAddr = (addr >> 1) & 0xFFF;
+    return soc->rootp->PipSoc__DOT__dataRam[wordAddr];
+}
 };
 
 std::vector<u16> loadHexFile(const std::string& filename) {
@@ -512,40 +488,34 @@ int main(int argc, char** argv) {
             for (int i = 0; i < n; i++) {
                 emu.tick();
                 auto r = emu.soc->rootp;
+                auto rEX_type = r->PipSoc__DOT__core__DOT__rEX_type;
+                auto ldState = r->PipSoc__DOT__core__DOT__ldState;
+                auto pc_ = r->PipSoc__DOT__core__DOT__pc;
                 auto reqFire = r->PipSoc__DOT__io_dataBus_req_fire;
                 auto rspFire = r->PipSoc__DOT__io_dataBus_rsp_fire;
-                auto addr = r->PipSoc__DOT__core_io_dataBus_req_payload_addr;
-                auto wrData = r->PipSoc__DOT__core_io_dataBus_req_payload_wrData;
-                auto exVld = r->PipSoc__DOT__core__DOT__exVld;
-                auto exIsST = r->PipSoc__DOT__core__DOT__exIsST;
-                auto exIsLD = r->PipSoc__DOT__core__DOT__exIsLD;
-                auto pc_ = r->PipSoc__DOT__core__DOT__pc;
-                auto rspData = r->PipSoc__DOT__core_io_dataBus_rsp_payload;
-                auto ramRspVld = r->PipSoc__DOT__ramRspVld;
-                auto ramRd = r->PipSoc__DOT__dataRam_spinal_port0;
-                auto stallEx = r->PipSoc__DOT__core__DOT__stallId;
-                auto stallWb = r->PipSoc__DOT__core__DOT__stallWb;
-                auto ldActive = r->PipSoc__DOT__core__DOT__ldActive;
-                auto exRd = r->PipSoc__DOT__core__DOT__exRd;
+                auto stallID = r->PipSoc__DOT__core__DOT__stallID;
+                auto exVld = rEX_type != 0;
+                auto exIsALU = rEX_type == 1;
+                auto exIsLD = rEX_type == 2;
+                auto exIsST = rEX_type == 3;
+                auto ldActive = ldState == 1 || ldState == 2;
+                auto rEX_rd = r->PipSoc__DOT__core__DOT__rEX_rd;
                 auto exRsAddr = r->PipSoc__DOT__core__DOT__exRsAddr;
                 auto exRtAddr = r->PipSoc__DOT__core__DOT__exRtAddr;
-                auto wbRd = r->PipSoc__DOT__core__DOT__wbRd;
-                auto wbHasRd = r->PipSoc__DOT__core__DOT__wbHasRd;
-                auto exIsALU = r->PipSoc__DOT__core__DOT__exIsALU;
-                auto exHasRd = r->PipSoc__DOT__core__DOT__exHasRd;
+                auto rWB_rd = r->PipSoc__DOT__core__DOT__rWB_rd;
+                auto rWB_hasRd = r->PipSoc__DOT__core__DOT__rWB_hasRd;
                 auto aluRes = r->PipSoc__DOT__core__DOT__alu_1_io_result;
                 auto exBrTaken = r->PipSoc__DOT__core__DOT__exBrTaken;
-                auto wbResult = r->PipSoc__DOT__core__DOT__wbResult;
-                auto wbLdPhase = r->PipSoc__DOT__core__DOT__wbLdPhase;
+                auto rWB_result = r->PipSoc__DOT__core__DOT__rWB_result;
+                auto ldData = r->PipSoc__DOT__core__DOT__ldData;
+                auto rspVld = r->PipSoc__DOT__ramRspVld;
                 auto r1_val = emu.readReg(1);
                 auto r2_val = emu.readReg(2);
                 auto r3_val = emu.readReg(3);
-                auto wbLd = r->PipSoc__DOT__core__DOT__wbLdData;
-                auto rspVld = r->PipSoc__DOT__ramRspVld;
-                printf("[%ld] PC=%04x exV=%d ALU=%d LD=%d ST=%d rd=%d rs=%d rt=%d br=%d rspF=%d alu=%04x wbRs=%04x stlEx=%d stlWb=%d ldA=%d wbRd=%d wbH=%d ldPh=%d wbLd=%04x rspV=%d R1=%04x R2=%04x R3=%04x\n",
-                    (long)emu.readCycle(), pc_, exVld, exIsALU, exIsLD, exIsST, exRd, exRsAddr, exRtAddr, exBrTaken,
-                    rspFire, aluRes, wbResult, stallEx, stallWb, ldActive, wbRd, wbHasRd, wbLdPhase,
-                    wbLd, rspVld, r1_val, r2_val, r3_val);
+                printf("[%ld] PC=%04x exV=%d ALU=%d LD=%d ST=%d rd=%d rs=%d rt=%d br=%d rspF=%d alu=%04x wbRs=%04x stl=%d ldA=%d wbRd=%d wbH=%d ldPh=%d wbLd=%04x rspV=%d R1=%04x R2=%04x R3=%04x\n",
+                    (long)emu.readCycle(), pc_, exVld, exIsALU, exIsLD, exIsST, rEX_rd, exRsAddr, exRtAddr, exBrTaken,
+                    rspFire, aluRes, rWB_result, stallID, ldActive, rWB_rd, rWB_hasRd, (int)ldState,
+                    ldData, rspVld, r1_val, r2_val, r3_val);
             }
         }
         else if (cmd == 'g') {

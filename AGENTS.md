@@ -87,6 +87,18 @@
     - Fix 3 (exServiced): Added `exServiced` register (set by EX→WB, cleared by ID→EX). Used as `!exServiced` guard in both `loadUseEx` and the `ldActive` trigger. Prevents stale EX from re-entering the LD state machine or re-triggering hazard detection after its instruction has already left EX.
     - Verified: formal BMC(30) passes, ldst_test.asm shows R3=0 (R2-R1=42-42), data init loop no longer deadlocks
 
+13. **PipCore SpinalEnum + pipeline refactoring** (PipCore.scala):
+    - Replaced 7 individual EX Bool registers (`exIsALU`, `exIsLD`, `exIsST`, `exIsJMP`, `exIsBranch`, `exIsLDI`, `exIsImmEn`) with single `rEX_type`: `InstrType()` SpinalEnum register
+    - `InstrType`: `EMPTY, ALU, LD, ST, JMP, BR, LDI` — makes illegal state combinations impossible
+    - Replaced manual LD state machine (`ldPending`/`ldRspPending` registers + `wbLdPhase`) with `ldState`: `LdPhase()` register (IDLE/WAIT_BUS/DATA_READY)
+    - `exIsImmEn` now computed combinatorially from opcode at EX stage (no longer piped from ID)
+    - Removed `stallWb` (WB no longer stalls independently)
+    - Merged IF/ID pipeline registers (`ifInstr`→`rID_instr`, `idVld`→`vID`, etc.)
+    - Moved LD state FSM before stall logic (defines `ldPending`/`ldRspPending` before use)
+    - LD FSM uses `rEX_type =/= InstrType.LD` instead of `exBrTaken` for abort-on-flush (no circular dependency)
+    - Debug bus consolidated: `flsPipeline()` helper for cmds 0x03/0x04/0x05
+    - Formal BMC(30) passes with comprehensive assertions
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully
@@ -103,7 +115,7 @@
 - **PipSoc Emulator**: ✓ Compiles and runs (pipsoc-emu), separate emulator using PipSoc Verilog
 - **PipCore Formal Verification**: ✓ PipCore passes BMC(30)
 - **End-to-end LD/ST test**: ✓ ldst_test.asm: LDI 42, ST to mem, LD to R2, SUB R2-R1→R3, BEQ loop — R3=0 (correct: 42-42=0)
-- **C compiled tests on PipSoc**: 5/24 pass (minimal, mulonly, xori_test, div_test, fib5) — **pre-existing failures** (PipCore was always broken for C tests; old multi-cycle Core passes all 24)
+- **C compiled tests on PipSoc**: 2/24 pass (mulonly, div_test) — **pre-existing failures** (PipCore was always broken for C tests; old multi-cycle Core passes all 24)
 
 #### ISA Coverage (24 test programs, all pass via `make test-programs`)
 

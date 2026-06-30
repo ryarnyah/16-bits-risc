@@ -3,8 +3,17 @@ package risc
 import spinal.core._
 import spinal.core.formal._
 import spinal.lib._
+// import spinal.lib.fsm._
 
 import scala.language.postfixOps
+
+object InstrType extends SpinalEnum {
+  val EMPTY, ALU, LD, ST, JMP, BR, LDI = newElement()
+}
+
+object LdPhase extends SpinalEnum {
+  val IDLE, WAIT_BUS, DATA_READY = newElement()
+}
 
 case class PipCore() extends Component with CoreBusIoComponent {
   val io: CoreIo = CoreIo()
@@ -20,411 +29,324 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val alu = ALU()
   private val busIf = BusInterface()
 
-  // === Bus interface ===
   io.bus.cmd >> busIf.io.cmd
   busIf.io.rsp >> io.bus.rsp
   io.bus.ack := busIf.io.ack
 
-  // === Core state ===
+  // =========================================================================
+  // PC
+  // =========================================================================
   private val pc = Reg(UInt(16 bits)) init 0
-  private val running = Reg(Bool()) init True
-  private val resetn = ClockDomain.current.readResetWire
-  private val state = RegInit(CoreState.FETCH)
-
-  // Pipeline active when executing (not in IDLE debug state)
-  private val pipelineActive = state =/= CoreState.IDLE && resetn
-
-  // PC is output for instruction fetch
   io.instrAddr := pc
 
   // =========================================================================
-  // Instruction Fetch Buffer — registers the raw fetch from the ROM
+  // Pipeline Registers — IF/ID
   // =========================================================================
-  private val fetchBufPc = Reg(UInt(16 bits)) init 0
-  private val fetchBufData = Reg(Bits(16 bits)) init 0
-  private val fetchBufVld = Reg(Bool()) init False
+  private val rID_instr = Reg(Bits(16 bits))
+  private val rID_pc = Reg(UInt(16 bits))
+  private val rID_ldiData = Reg(Bits(16 bits))
 
   // =========================================================================
-  // IF Stage — Instruction Fetch
+  // Pipeline Registers — ID/EX
   // =========================================================================
-  // LDI (opcode 0xF) is a 2-word instruction. IF fetches header then immediate
-  // in consecutive cycles, presenting the complete LDI to ID on cycle 2.
+  private val rEX_instr = Reg(Bits(16 bits))
+  private val rEX_pc = Reg(UInt(16 bits))
+  private val rEX_rd = Reg(UInt(3 bits))
+  private val rEX_hasRd = Reg(Bool()) init False
+  private val rEX_rsVal = Reg(Bits(16 bits))
+  private val rEX_rtVal = Reg(Bits(16 bits))
+  private val rEX_sext = Reg(Bits(16 bits))
+  private val rEX_effAddr = Reg(Bits(16 bits))
+  private val rEX_brTarget = Reg(Bits(16 bits))
+  private val rEX_ldiData = Reg(Bits(16 bits))
 
-  private val ifLdiPending = Reg(Bool()) init False
-  private val ifLdiHeader = Reg(Bits(16 bits))
-  private val ifLdiHeaderPc = Reg(UInt(16 bits))
+  private val rEX_type = Reg(InstrType()) init InstrType.EMPTY
+  private val rEX_aluFunc = Reg(Bits(3 bits))
 
-  // IF→ID pipeline register (output of IF, input to ID)
-  private val ifInstr = Reg(Bits(16 bits))
-  private val ifPc = Reg(UInt(16 bits))
-  private val ifVld = Reg(Bool()) init False
-  private val ifLdiData = Reg(Bits(16 bits))
+  private val rEX_isBEQ = rEX_instr(15 downto 12) === B"1100"
+  private val rEX_isBNE = rEX_instr(15 downto 12) === B"1101"
+  private val rEX_isBLT = rEX_instr(15 downto 12) === B"1110"
 
-  // Pipeline register IF→ID
-  private val idInstr = Reg(Bits(16 bits))
-  private val idPc = Reg(UInt(16 bits))
-  private val idVld = Reg(Bool()) init False
-  private val idLdiData = Reg(Bits(16 bits))
+  // =========================================================================
+  // Pipeline Registers — EX/WB
+  // =========================================================================
+  private val rWB_rd = Reg(UInt(3 bits))
+  private val rWB_hasRd = Reg(Bool()) init False
+  private val rWB_result = Reg(Bits(16 bits))
 
-  // Decoder (combinational from idInstr)
-  decoder.io.instr := idInstr
+  // =========================================================================
+  // Pipeline Valid Bits
+  // =========================================================================
+  private val vID = Reg(Bool()) init False
+  private val vWB = Reg(Bool()) init False
 
-  // Register file addressing (same as Core.scala)
+  // =========================================================================
+  // Decoder (combinational from rID_instr)
+  // =========================================================================
+  decoder.io.instr := rID_instr
+
+  // =========================================================================
+  // Register File Read Ports
+  // =========================================================================
   private val idRsAddr = ((decoder.io.isBranch || decoder.io.isJMP) ?
     decoder.io.instr(11 downto 9).asBits | decoder.io.rsReg.asBits).asUInt
   private val idRtAddr = (decoder.io.isST ?
     decoder.io.rdField.asBits |
     (decoder.io.isBranch ? decoder.io.instr(8 downto 6).asBits | decoder.io.rtReg.asBits)).asUInt
 
-  private val idSextVal = decoder.io.imm6.asSInt.resize(16).asBits
-  private val idEffAddr = (regFile.io.rsVal.asSInt + idSextVal.asSInt).asBits.resized
-  private val idBrShifted = idSextVal(14 downto 0) ## B"0"
-  private val idBrTarget = (idPc.asSInt + 2 + idBrShifted.asSInt).asBits.resized
-
   regFile.io.rsAddr := idRsAddr
   regFile.io.rtAddr := idRtAddr
 
   // =========================================================================
-  // EX Stage — ALU + Memory Address + Branch
+  // LD State Machine
   // =========================================================================
-
-  // Pipeline register ID→EX
-  private val exVld = Reg(Bool()) init False
-  private val exInstr = Reg(Bits(16 bits))
-  private val exPc = Reg(UInt(16 bits))
-  private val exRd = Reg(UInt(3 bits))
-  private val exHasRd = Reg(Bool()) init False
-  private val exIsALU = Reg(Bool()) init False
-  private val exIsLD = Reg(Bool()) init False
-  private val exIsST = Reg(Bool()) init False
-  private val exIsJMP = Reg(Bool()) init False
-  private val exIsBEQ = Reg(Bool()) init False
-  private val exIsBNE = Reg(Bool()) init False
-  private val exIsBLT = Reg(Bool()) init False
-  private val exIsLDI = Reg(Bool()) init False
-  private val exIsImmEn = Reg(Bool()) init False
-  private val exAluFunc = Reg(Bits(3 bits))
-  private val exRsVal = Reg(Bits(16 bits))
-  private val exRtVal = Reg(Bits(16 bits))
-  private val exSextVal = Reg(Bits(16 bits))
-  private val exEffAddr = Reg(Bits(16 bits))
-  private val exBrTarget = Reg(Bits(16 bits))
-  private val exLdiData = Reg(Bits(16 bits))
-
-  // Source register addresses from the EX instruction
-  private val exRdField = exInstr(11 downto 9)
-  private val exRsReg = exInstr(8 downto 6)
-  private val exRtReg = exInstr(5 downto 3)
-  private val exRsAddr = ((exIsBEQ || exIsBNE || exIsBLT || exIsJMP) ? exRdField | exRsReg).asUInt
-  private val exRtAddr = Mux(exIsST, exRdField.asUInt,
-    Mux(exIsBEQ || exIsBNE || exIsBLT, exInstr(8 downto 6).asUInt, exRtReg.asUInt))
-
-  // =========================================================================
-  // WB Stage — Writeback (register declarations only)
-  // =========================================================================
-
-  private val wbRd = Reg(UInt(3 bits))
-  private val wbHasRd = Reg(Bool()) init False
-  private val wbResult = Reg(Bits(16 bits))
-  private val wbIsLD = Reg(Bool()) init False
-  private val wbIsLDI = Reg(Bool()) init False
-
-  // Shadow of previous WB values — preserves the previous wbResult for
-  // an extra cycle so that forwarding still works when a back-to-back WB
-  // write (e.g. LDI then LD) overwrites wbResult before EX can read it.
-  // Without this, the classic pattern:
-  //   LDI R4, #addr;  LD R1, [R7];  JMP R4
-  // loses R4's value when LD enters WB on the same cycle JMP enters EX.
-  private val prevWbHasRd = Reg(Bool()) init False
-  private val prevWbRd = Reg(UInt(3 bits))
-  private val prevWbResult = Reg(Bits(16 bits))
-
-  // =========================================================================
-  // Data Bus Response Capture (latches single-cycle rsp pulse in WB)
-  // =========================================================================
-
-  // LD write state machine — uses ldActive instead of wbIsLD so that
-  // the LD state is not lost when EX→WB overwrites the pipeline registers.
-  // 0 = idle
-  // 1 = response captured, write pending
-  // 2 = writing LD data (holds pipeline for 1 cycle so non-LD write can happen next)
-  private val wbLdPhase = RegInit(U(0, 2 bits))
-  private val wbLdData = Reg(Bits(16 bits))
-  private val ldActive = Reg(Bool()) init False
   private val ldRd = Reg(UInt(3 bits))
+  private val ldData = Reg(Bits(16 bits))
+  private val ldState = Reg(LdPhase()) init LdPhase.IDLE
+  private val ldPending = ldState === LdPhase.WAIT_BUS
+  private val ldRspPending = ldState === LdPhase.DATA_READY
+  io.dataBus.rsp.ready := ldPending
 
-  // stallWb defined here (before ldActive/ldRd setting) to break circular dep
-  private val stallWb = ldActive && (wbLdPhase === 1 || wbLdPhase === 2)
-
-  // Tracks whether the current EX instruction has been transferred to WB.
-  // Set by EX→WB, cleared by ID→EX. Prevents stale EX from re-entering
-  // the LD state machine or re-triggering load-use hazard detection.
-  private val exServiced = Reg(Bool()) init False
-
-  // Set when LD enters WB, cleared when LD completes
-  // !exServiced guard prevents re-entry after LD was already serviced
-  when(!stallWb && exVld && exIsLD && !exServiced) {
-    ldActive := True
-    ldRd := exRd
-  }
-  when(ldActive && wbLdPhase === 2) {
-    ldActive := False
-  }
-
-  when(io.dataBus.rsp.fire) {
-    wbLdData := io.dataBus.rsp.payload
-    wbLdPhase := 1  // write_pending
-  }
-  when(ldActive && wbLdPhase === 1) {
-    wbLdPhase := 2  // writing
-  }
-  when(ldActive && wbLdPhase === 2) {
-    wbLdPhase := 0  // done
-  }
-
-  // LD write happens in phase 2 (cycle after response, while pipeline stalled)
-  private val ldWriteNow = ldActive && wbLdPhase === 2
-  private val ldWriteAddr = ldRd
+  // Forwarding from WB stage (used by both ID address and EX ALU forwarding)
+  private val fwdFromWb = rWB_hasRd && rWB_rd =/= 0
 
   // =========================================================================
-  // EX Stage — Forwarding and Computation
+  // ID-stage Address Computations
   // =========================================================================
-
-  // Forward from WB to EX: when WB has a valid result that EX needs
-  // Forwarding is gated with exVld to prevent a combinational feedback
-  // loop when exVld=0 (bubble).  The prevWb* tier handles the case where
-  // the current wbResult was overwritten by a back-to-back WB write
-  // (e.g. LDI → LD) before EX could read it in the previous cycle.
-  private val memWbLdDataAvail = ldActive && ldRd =/= 0 && (io.dataBus.rsp.fire || wbLdPhase === 1 || wbLdPhase === 2)
-  private val memWbLdData = Mux(io.dataBus.rsp.fire, io.dataBus.rsp.payload, wbLdData)
-  private val exFwdRsVal = Mux(memWbLdDataAvail && ldRd === exRsAddr,
-                    memWbLdData,
-                    Mux(exVld && wbHasRd && wbRd =/= 0 && wbRd === exRsAddr && !ldActive,
-                        wbResult,
-                    Mux(exVld && prevWbHasRd && prevWbRd =/= 0 && prevWbRd === exRsAddr,
-                        prevWbResult,
-                        exRsVal)))
-  private val exFwdRtVal = Mux(memWbLdDataAvail && ldRd === exRtAddr,
-                    memWbLdData,
-                    Mux(exVld && wbHasRd && wbRd =/= 0 && wbRd === exRtAddr && !ldActive,
-                        wbResult,
-                    Mux(exVld && prevWbHasRd && prevWbRd =/= 0 && prevWbRd === exRtAddr,
-                        prevWbResult,
-                        exRtVal)))
-
-  // ALU
-  alu.io.rsVal := exFwdRsVal
-  alu.io.opB := Mux(exIsImmEn, exSextVal, exFwdRtVal)
-  alu.io.aluFunc := exAluFunc
-
-  // LD/ST effective address (recompute from forwarded values)
-  private val exEffAddr2 = (exFwdRsVal.asSInt + exSextVal.asSInt).asBits.resized
-
-  // Branch condition evaluation
-  private val exBrTaken = (exIsJMP ||
-    (exIsBEQ && (exFwdRsVal === exFwdRtVal)) ||
-    (exIsBNE && (exFwdRsVal =/= exFwdRtVal)) ||
-    (exIsBLT && (exFwdRsVal.asSInt < exFwdRtVal.asSInt))) && exVld
-
-  // Branch/JMP redirect target
-  private val exBrShifted = exSextVal(14 downto 0) ## B"0"
-  private val exBrTarget2 = (exPc.asSInt + 2 + exBrShifted.asSInt).asBits.resized
-  private val exJmpTarget = exFwdRsVal.asUInt
-
-  private val exBranchTaken = exBrTaken
+  private val idSext = decoder.io.imm6.asSInt.resize(16).asBits
+  // Forwarding for address computation: LD/ST use rs+imm6, but rs may be
+  // updated by the instruction currently in EX (ALU/LDI) or WB/LD.
+  private val idFwdRsVal = Mux(fwdFromWb && rWB_rd === idRsAddr,
+    rWB_result,
+    Mux(ldRspPending && ldRd === idRsAddr && ldRd =/= 0,
+      ldData,
+      Mux(rEX_type === InstrType.ALU && rEX_hasRd && rEX_rd === idRsAddr && rEX_rd =/= 0,
+        alu.io.result,
+        Mux(rEX_type === InstrType.LDI && rEX_hasRd && rEX_rd === idRsAddr && rEX_rd =/= 0,
+          rEX_ldiData,
+          regFile.io.rsVal))))
+  private val idEffAddr = (idFwdRsVal.asSInt + idSext.asSInt).asBits.resized
+  private val idBrShifted = idSext(14 downto 0) ## B"0"
+  private val idBrTarget = (rID_pc.asSInt + 2 + idBrShifted.asSInt).asBits.resized
 
   // =========================================================================
-  // Stall Logic
+  // EX-stage register addresses (for forwarding)
   // =========================================================================
-
-  // EX stalls when WB stalled, or EX has unserviced LD/ST
-  private val stallEx = stallWb ||
-                (exVld && exIsLD && !io.dataBus.req.fire) ||
-                (exVld && exIsST && !io.dataBus.req.fire)
-
-  // Load-use hazard: ID needs a register that EX or WB is loading
-  private val idUsesRs = !decoder.io.isLDI && idVld
-  private val idUsesRt = (decoder.io.isALU || decoder.io.isST || decoder.io.isBranch) && idVld
-
-  // Only detect load-use hazard when LD is genuinely in EX, not after
-  // it's already been transferred to WB (exServiced=1 means EX→WB fired,
-  // so the exVld/exIsLD values are stale). Without this guard, the stale
-  // LD in EX would cause a deadlock: loadUseEx blocks ID→EX forever
-  // because nothing clears exVld, and EX→WB re-enters the LD state machine.
-  private val loadUseEx = exVld && exIsLD && exHasRd && exRd =/= 0 &&
-    !exServiced &&
-    ((idUsesRs && idRsAddr === exRd) || (idUsesRt && idRtAddr === exRd))
-
-  private val loadUseWb = ldActive && wbLdPhase === 0 && ldRd =/= 0 &&
-    ((idUsesRs && idRsAddr === ldRd) || (idUsesRt && idRtAddr === ldRd))
-
-  private val ldUseStall = loadUseEx || loadUseWb
-
-  private val stallId = ldUseStall || stallEx
-  private val stallIf = stallId
-
-  // Gate instruction fetch — external ready signal used for IF stall gating
-  io.instrRsp.ready := !stallIf && pipelineActive
+  private val exRsAddr = ((rEX_type === InstrType.BR || rEX_type === InstrType.JMP) ?
+    rEX_instr(11 downto 9).asBits | rEX_instr(8 downto 6).asBits).asUInt
+  private val exRtAddr = Mux(rEX_type === InstrType.ST, rEX_instr(11 downto 9).asUInt,
+    Mux(rEX_type === InstrType.BR, rEX_instr(8 downto 6).asUInt, rEX_instr(5 downto 3).asUInt))
 
   // =========================================================================
-  // Fetch Buffer Logic — updates from the instruction stream
+  // LD State Machine — Transitions
   // =========================================================================
-  // The fetch buffer is gated on !stallIf so that a fetched instruction
-  // is not lost when the pipeline stalls before IF can consume it.
-  when(io.instrRsp.fire && pipelineActive) {
-    fetchBufPc := pc
-    fetchBufData := io.instrRsp.payload
-    fetchBufVld := True
-    pc := pc + 2
-  } otherwise {
-    when(!io.instrRsp.fire && !stallIf) {
-      fetchBufVld := False
-    }
-  }
-
-  // Part-select on REGISTERED data (safe from Verilator bug)
-  private val instrIsLDI = fetchBufVld && fetchBufData(15 downto 12) === B"1111"
-
-  // =========================================================================
-  // IF Stage — processes the registered fetch buffer
-  // =========================================================================
-  // This logic is placed here (after stallIf is defined) so it can preserve
-  // ifVld during pipeline stalls by checking !stallIf.
-  // Gate fetchBuf processing on !stallIf so that instructions already in IF
-  // are not overwritten during a pipeline stall (e.g. LD write-back delay).
-  when(fetchBufVld && !stallIf) {
-    val fetchedAt = fetchBufPc
-    when(!ifLdiPending) {
-      when(instrIsLDI) {
-        ifLdiPending := True
-        ifLdiHeader := fetchBufData
-        ifLdiHeaderPc := fetchedAt
-        ifVld := False
-      } otherwise {
-        ifInstr := fetchBufData
-        ifPc := fetchedAt
-        ifVld := True
-        ifLdiData := 0
+  switch(ldState) {
+    is(LdPhase.IDLE) {
+      when(rEX_type === InstrType.LD && io.dataBus.req.fire) {
+        ldRd := rEX_rd
+        ldState := LdPhase.WAIT_BUS
       }
+    }
+    is(LdPhase.WAIT_BUS) {
+      when(io.dataBus.rsp.fire) {
+        ldData := io.dataBus.rsp.payload
+        ldState := LdPhase.DATA_READY
+      }
+    }
+    is(LdPhase.DATA_READY) {
+      when(rEX_type === InstrType.LD && io.dataBus.req.fire) {
+        ldRd := rEX_rd
+        ldState := LdPhase.WAIT_BUS
+      } otherwise {
+        ldState := LdPhase.IDLE
+      }
+    }
+  }
+
+  // =========================================================================
+  // Stall and Flush Logic
+  // =========================================================================
+
+  // Load-use hazard: EX has LD that writes a register needed by ID
+  private val idNeedsRs = vID && !decoder.io.isLDI
+  private val idNeedsRt = vID && (decoder.io.isALU || decoder.io.isST || decoder.io.isBranch)
+  private val loadUseHazard = rEX_type === InstrType.LD && !ldRspPending && rEX_hasRd && rEX_rd =/= 0 &&
+    ((idNeedsRs && idRsAddr === rEX_rd) || (idNeedsRt && idRtAddr === rEX_rd))
+  private val ldWaitStall = rEX_type === InstrType.LD && ldPending && !ldRspPending
+  private val stallID = loadUseHazard || ldWaitStall
+  private val stallIF = stallID
+
+  // =========================================================================
+  // Forwarding and Branch Detection
+  // =========================================================================
+
+  private val exFwdRsVal = Mux(fwdFromWb && rWB_rd === exRsAddr,
+    rWB_result,
+    Mux(ldRspPending && ldRd === exRsAddr,
+      ldData,
+      rEX_rsVal))
+  private val exFwdRtVal = Mux(fwdFromWb && rWB_rd === exRtAddr,
+    rWB_result,
+    Mux(ldRspPending && ldRd === exRtAddr,
+      ldData,
+      rEX_rtVal))
+
+  // Branch taken — used in IF (to block fetch), ID→EX (to flush), and EX→WB
+  private val exBrTaken =
+    rEX_type === InstrType.JMP ||
+    (rEX_type === InstrType.BR && rEX_isBEQ && (exFwdRsVal === exFwdRtVal)) ||
+    (rEX_type === InstrType.BR && rEX_isBNE && (exFwdRsVal =/= exFwdRtVal)) ||
+    (rEX_type === InstrType.BR && rEX_isBLT && (exFwdRsVal.asSInt < exFwdRtVal.asSInt))
+
+  // =========================================================================
+  // IF Stage — Instruction Fetch
+  // =========================================================================
+  private val ldiPending = Reg(Bool()) init False
+  private val ldiHeader = Reg(Bits(16 bits))
+  private val ldiHeaderPc = Reg(UInt(16 bits))
+
+  io.instrRsp.ready := !stallIF
+
+  private val instrIsLDI = io.instrRsp.payload(15 downto 12) === B"1111"
+
+  when(io.instrRsp.fire) {
+    when(instrIsLDI && !ldiPending) {
+      ldiPending := True
+      ldiHeader := io.instrRsp.payload
+      ldiHeaderPc := pc
+      pc := pc + 2
+      vID := False
     } otherwise {
-      ifInstr := ifLdiHeader
-      ifPc := ifLdiHeaderPc
-      ifVld := True
-      ifLdiData := fetchBufData
-      ifLdiPending := False
+      when(ldiPending) {
+        rID_instr := ldiHeader
+        rID_pc := ldiHeaderPc
+        rID_ldiData := io.instrRsp.payload
+        vID := True
+        ldiPending := False
+        pc := pc + 2
+      } otherwise {
+        rID_instr := io.instrRsp.payload
+        rID_pc := pc
+        rID_ldiData := 0
+        vID := True
+        pc := pc + 2
+      }
     }
   } otherwise {
-    when(!ifLdiPending && !stallIf) {
-      ifVld := False
+    when(!stallIF && !ldiPending) {
+      vID := False
     }
   }
 
-  // =========================================================================
-  // Data Bus Request
-  // =========================================================================
-
-  // LD/ST sends data bus request when in EX
-  io.dataBus.req.valid := exVld && (exIsLD || exIsST) && pipelineActive
-
-  // Accept data bus response when WB or EX has a pending LD
-  io.dataBus.rsp.ready := (ldActive || (exVld && exIsLD)) && pipelineActive
-
-  // =========================================================================
-  // Pipeline Transfer Logic
-  // =========================================================================
-
-  // Non-LD result (used by both EX→WB and regfile non-LD write)
-  private val nonLdResult = Mux(exIsLDI, exLdiData,
-                    Mux(exIsALU || exIsImmEn, alu.io.result, B(0, 16 bits)))
-
-  // EX → WB
-  // NOTE: Uses data-path Mux on exVld instead of clock-enable gating,
-  // because Verilator 5's CLKENA dead-code elimination removes exVld
-  // from `if (!stallWb && exVld)` regardless of -fno-const flags.
-  // When exVld=0 (bubble or flushed), the Mux holds the current value.
-  // Also captures prevWb* BEFORE overwriting, so forwarding can still
-  // see the previous wbResult when a back-to-back write overwrites it.
-  when(!stallWb) {
-    prevWbHasRd := wbHasRd
-    prevWbRd := wbRd
-    prevWbResult := wbResult
-
-    wbRd := Mux(exVld, exRd, wbRd)
-    wbHasRd := Mux(exVld && !exIsLD, exHasRd, wbHasRd)
-    wbResult := Mux(exVld, nonLdResult, wbResult)
-    wbIsLD := Mux(exVld, exIsLD, wbIsLD)
-    wbIsLDI := Mux(exVld, exIsLDI, wbIsLDI)
-
-    exServiced := True
-  }
-
-  // IF → ID (blocked by branch redirect so stale instructions don't enter EX)
-  when(!stallId && !exBranchTaken) {
-    idInstr := ifInstr
-    idPc := ifPc
-    idVld := ifVld
-    idLdiData := ifLdiData
-  }
-
-  // ID → EX (when not stalled by EX or branch flush)
-  when(!stallId && !exBranchTaken) {
-    exVld := idVld
-    exInstr := idInstr
-    exPc := idPc
-    exRd := (decoder.io.hasRd ? decoder.io.rdField | B"000").asUInt
-    exHasRd := decoder.io.hasRd
-    exIsALU := decoder.io.isALU
-    exIsLD := decoder.io.isLD
-    exIsST := decoder.io.isST
-    exIsJMP := decoder.io.isJMP
-    exIsBEQ := decoder.io.isBEQ
-    exIsBNE := decoder.io.isBNE
-    exIsBLT := decoder.io.isBLT
-    exIsLDI := decoder.io.isLDI
-    exIsImmEn := decoder.io.isImmEn
-    exAluFunc := decoder.io.aluFunc
-    exRsVal := regFile.io.rsVal
-    exRtVal := regFile.io.rtVal
-    exSextVal := idSextVal
-    exEffAddr := idEffAddr
-    exBrTarget := idBrTarget
-    exLdiData := idLdiData
-
-    exServiced := False
-  }
-
-  // Branch/JMP redirect — placed here AFTER pipeline transfers so clearing
-  // of pipeline stage valid bits takes priority over the transfer logic.
-  when(exBranchTaken) {
-    pc := Mux(exIsJMP, exJmpTarget, exBrTarget2.asUInt)
-    fetchBufVld := False
-    ifVld := False
-    ifLdiPending := False
-    idVld := False
-    exVld := False
+  when(exBrTaken) {
+    ldiPending := False
   }
 
   // =========================================================================
-  // Data Bus Payload
+  // EX Stage — ALU, Branch, LD/ST
   // =========================================================================
+  // NOTE: All EX stage logic is combinational (no := assignments), so it
+  // always uses the CURRENT rEX_* values regardless of ordering.
 
-  io.dataBus.req.payload.addr := exEffAddr2.asUInt
+  // Immediate enable for ALU operands (computed from opcode, see ISA.md §3.2)
+  private val exIsImmEn = rEX_instr(15 downto 12) === 0x01 || rEX_instr(15 downto 12) === 0x03
+
+  alu.io.rsVal := exFwdRsVal
+  alu.io.opB := Mux(exIsImmEn, rEX_sext, exFwdRtVal)
+  alu.io.aluFunc := rEX_aluFunc
+
+  // EX result (for non-LD/ST)
+  private val exResult = Mux(rEX_type === InstrType.LDI, rEX_ldiData,
+    Mux(rEX_type === InstrType.ALU || exIsImmEn, alu.io.result, B(0, 16 bits)))
+
+  // Data bus request (combinational)
+  io.dataBus.req.payload.addr := rEX_effAddr.asUInt
   io.dataBus.req.payload.wrData := exFwdRtVal
-  io.dataBus.req.payload.wr := exIsST
+  io.dataBus.req.payload.wr := rEX_type === InstrType.ST
+  io.dataBus.req.valid := rEX_type === InstrType.LD || rEX_type === InstrType.ST
 
   // =========================================================================
-  // Register File Write
+  // EX → WB Transfer — MUST come BEFORE ID→EX so it sees the OLD rEX_* values
   // =========================================================================
 
-  // LD writes use ldWriteNow (phase 2) with ldWriteAddr = wbRd.
-  // Non-LD writes use WB-stage values: when an instruction with a destination
-  // register is in WB and the LD is not writing, it writes its result.
-  regFile.io.wrAddr := Mux(ldWriteNow, ldWriteAddr, wbRd)
-  regFile.io.wrData := Mux(ldWriteNow, wbLdData, wbResult)
-  regFile.io.wrEn := (ldWriteNow && ldWriteAddr =/= 0) ||
-                     (wbHasRd && wbRd =/= 0 && !ldActive)
+  // Default: no new WB data
+  vWB := False
 
-  // Debug bus read port
+  // Non-LD/ST: transfer every cycle
+  when(rEX_type =/= InstrType.EMPTY && rEX_type =/= InstrType.LD && rEX_type =/= InstrType.ST && !exBrTaken) {
+    rWB_rd := rEX_rd
+    rWB_hasRd := rEX_hasRd
+    rWB_result := exResult
+    vWB := True
+  }
+
+  // LD: transfer when FSM is in DATA_READY state.
+  // Guard with rEX_type === LD to prevent overwriting a newer instruction's
+  // result when a load-use hazard resolves and the dependent instruction
+  // enters EX in the same cycle ldRspPending is still true.
+  when(ldRspPending && rEX_type === InstrType.LD) {
+    rWB_rd := ldRd
+    rWB_hasRd := True
+    rWB_result := ldData
+    vWB := True
+  }
+
+  // =========================================================================
+  // Branch target update (uses pre-clear rEX_type for JMP vs BR)
+  // =========================================================================
+  when(exBrTaken) {
+    pc := Mux(rEX_type === InstrType.JMP, exFwdRsVal.asUInt, rEX_brTarget.asUInt)
+    vID := False
+    ldiPending := False
+  }
+
+  // =========================================================================
+  // ID → EX Transfer — AFTER EX→WB so it doesn't corrupt writeback values
+  // =========================================================================
+  private val idType = InstrType()
+  idType := InstrType.ALU
+  when(decoder.io.isLD) { idType := InstrType.LD }
+  when(decoder.io.isST) { idType := InstrType.ST }
+  when(decoder.io.isJMP) { idType := InstrType.JMP }
+  when(decoder.io.isBranch) { idType := InstrType.BR }
+  when(decoder.io.isLDI) { idType := InstrType.LDI }
+
+  // Clear rEX_type on branch (prevents stale EX→WB after flush)
+  when(exBrTaken) {
+    rEX_type := InstrType.EMPTY
+    ldiPending := False
+  }
+
+  // Normal ID→EX transfer (when no stall and not flushing)
+  when(!stallID && !exBrTaken) {
+    rEX_instr := rID_instr
+    rEX_pc := rID_pc
+    rEX_rd := (decoder.io.hasRd ? decoder.io.rdField | B"000").asUInt
+    rEX_hasRd := decoder.io.hasRd
+    rEX_rsVal := regFile.io.rsVal
+    rEX_rtVal := regFile.io.rtVal
+    rEX_sext := idSext
+    rEX_effAddr := idEffAddr
+    rEX_brTarget := idBrTarget
+    rEX_ldiData := rID_ldiData
+
+    rEX_aluFunc := decoder.io.aluFunc
+    rEX_type := Mux(vID, idType, InstrType.EMPTY)
+  }
+
+  // =========================================================================
+  // WB Stage — Register File Write
+  // =========================================================================
+  regFile.io.wrAddr := rWB_rd
+  regFile.io.wrData := rWB_result
+  regFile.io.wrEn := vWB && rWB_hasRd && rWB_rd =/= 0
+
+  // =========================================================================
+  // Debug Bus
+  // =========================================================================
+
+  private val resetn = ClockDomain.current.readResetWire
+
   regFile.io.auxAddr := Mux(
     busIf.io.cmdStrb && busIf.io.cmdWord(31 downto 24) === 0x06,
     busIf.io.cmdWord(18 downto 16).asUInt,
@@ -432,29 +354,21 @@ case class PipCore() extends Component with CoreBusIoComponent {
   )
   io.dbgRegFile1 := regFile.io.auxVal
 
-  // =========================================================================
-  // Debug Bus
-  // =========================================================================
-
   busIf.io.cmdDone := False
   busIf.io.rspStrb := False
   busIf.io.rspWord := 0
 
+  private def flsPipeline(): Unit = {
+    ldiPending := False; vID := False
+    rEX_type := InstrType.EMPTY; vWB := False
+    busIf.io.cmdDone := True
+  }
+
   when(busIf.io.cmdStrb) {
     switch(busIf.io.cmdWord(31 downto 24)) {
-      is(0x03) {
-        state := CoreState.IDLE; pc := 0; running := False
-        ifLdiPending := False; ifVld := False; idVld := False; exVld := False
-        busIf.io.cmdDone := True
-      }
-      is(0x04) {
-        state := CoreState.FETCH; ifLdiPending := False; ifVld := False; idVld := False; exVld := False
-        busIf.io.cmdDone := True
-      }
-      is(0x05) {
-        state := CoreState.FETCH; running := True; ifLdiPending := False; ifVld := False; idVld := False; exVld := False
-        busIf.io.cmdDone := True
-      }
+      is(0x03) { flsPipeline() }
+      is(0x04) { flsPipeline() }
+      is(0x05) { flsPipeline() }
       is(0x06) {
         busIf.io.rspWord := B(0, 16 bits) ## regFile.io.auxVal
         busIf.io.rspStrb := True
@@ -469,12 +383,12 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // =========================================================================
   // Debug Outputs
   // =========================================================================
-  io.dbgState := state.asBits.resize(3 bits)
+  io.dbgRunning := True
+  io.dbgState := Mux(resetn, B"001", B"000")
   io.dbgPC := pc
-  io.dbgRunning := running
-  io.dbgRd := exRd
+  io.dbgRd := rEX_rd
   io.dbgAluRes := alu.io.result
-  io.dbgInstr := exInstr
+  io.dbgInstr := rEX_instr
   io.dbgCmdPhrase := busIf.io.cmdStrb
   io.dbgRspPhrase := busIf.io.rsp.fire
   io.dbgBusWordFire := busIf.io.cmdStrb
@@ -490,44 +404,238 @@ case class PipCore() extends Component with CoreBusIoComponent {
     val resetn = ClockDomain.current.readResetWire
     assumeInitial(!resetn)
     assumeInitial(!pastValid())
-    assumeInitial(state === CoreState.FETCH)
     assumeInitial(pc === 0)
-    assumeInitial(running)
-    assumeInitial(!idVld)
-    assumeInitial(!exVld)
-    assumeInitial(!ifLdiPending)
-    assumeInitial(!ifVld)
-    assumeInitial(!stallWb)
-    assumeInitial(!stallEx)
-    assumeInitial(!stallId)
-    assumeInitial(!wbIsLD)
-    assumeInitial(!wbHasRd)
-    assumeInitial(wbRd === 0)
+    assumeInitial(!vID)
+    assumeInitial(rEX_type === InstrType.EMPTY)
+    assumeInitial(!vWB)
+    assumeInitial(!ldiPending)
 
+    // ======================================================================
+    // Reset invariants
+    // ======================================================================
     when(!pastValid()) {
-      when(!resetn) {
-        assert(state === CoreState.FETCH)
-        assert(pc === 0)
-        assert(running)
-      }
+      when(!resetn) { assert(pc === 0) }
     }
 
-    when(regFile.io.rsAddr === 0) { assert(regFile.io.rsVal === 0) }
-
-    when(pastValid()) {
-      when(past(pipelineActive && !stallIf) && !past(ifLdiPending) &&
-           !past(exBranchTaken) && !past(stallIf) && resetn) {
+    // ======================================================================
+    // PC progression — ISA.md §4.3
+    // ======================================================================
+    when(pastValid() && resetn) {
+      when(past(vID) && !past(exBrTaken) && !past(stallIF)) {
         assert(pc === past(pc) + 2 || pc === past(pc))
       }
     }
 
-    cover(state === CoreState.FETCH)
-    cover(state === CoreState.FETCH)
-    cover(exVld && exIsALU)
-    cover(exVld && exIsLD)
-    cover(exVld && exIsLDI)
+    // ======================================================================
+    // R0 reads always return 0
+    // ======================================================================
+    when(regFile.io.rsAddr === 0) { assert(regFile.io.rsVal === 0) }
+    when(regFile.io.rtAddr === 0) { assert(regFile.io.rtVal === 0) }
+
+    // ======================================================================
+    // Register file never writes to R0
+    // ======================================================================
+    when(regFile.io.wrEn) { assert(regFile.io.wrAddr =/= 0) }
+
+    // ======================================================================
+    // Data bus request properties
+    // ======================================================================
+    when(rEX_type === InstrType.ST) {
+      assert(io.dataBus.req.valid)
+      assert(io.dataBus.req.payload.wr)
+    }
+    when(rEX_type === InstrType.LD) {
+      assert(io.dataBus.req.valid)
+      assert(!io.dataBus.req.payload.wr)
+    }
+
+    // ======================================================================
+    // EX result — LDI uses ldiData, not ALU
+    // ======================================================================
+    when(rEX_type === InstrType.LDI) {
+      assert(exResult === rEX_ldiData)
+    }
+
+    // ======================================================================
+    // Pipeline progression: ID → EX
+    // ======================================================================
+    when(pastValid() && resetn) {
+      when(past(vID) && !past(stallID) && !past(exBrTaken)) {
+        assert(rEX_type =/= InstrType.EMPTY)
+      }
+    }
+
+    // ======================================================================
+    // Pipeline progression: EX → WB (non-LD/ST, EX unchanged by stall)
+    // ======================================================================
+    when(pastValid() && resetn) {
+      when(past(rEX_type) =/= InstrType.EMPTY &&
+           past(rEX_type) =/= InstrType.LD &&
+           past(rEX_type) =/= InstrType.ST &&
+           !past(exBrTaken) && stallID) {
+        assert(vWB)
+      }
+    }
+
+    // ======================================================================
+    // LD state machine properties
+    // ======================================================================
+    when(rEX_type === InstrType.LD) { assert(io.dataBus.req.valid) }
+
+    // ldData captures the payload when bus response fires
+    when(pastValid() && resetn) {
+      when(past(io.dataBus.rsp.fire)) {
+        assert(ldData === past(io.dataBus.rsp.payload))
+      }
+    }
+
+    // ldRspPending (DATA_READY) in previous cycle implies vWB is asserted
+    when(pastValid() && resetn) {
+      when(past(ldRspPending)) {
+        assert(vWB)
+      }
+    }
+
+    // ======================================================================
+    // Instruction-Specific Correctness — ISA §3 / §4
+    // ======================================================================
+
+    // == ALU R-type (ADD, XOR, SUB, AND, OR, SLL, SRL): correct operands  ==
+    when(rEX_type === InstrType.ALU) {
+      assert(alu.io.rsVal === exFwdRsVal)
+      assert(alu.io.aluFunc === rEX_aluFunc)
+      assert(exResult === alu.io.result)
+      assert(rEX_hasRd)
+      when(!exIsImmEn) { assert(alu.io.opB === exFwdRtVal) }
+    }
+
+    // == Immediate ALU (ADDI / XORI, ISA §3.2): opB uses sign-extended imm ==
+    when(exIsImmEn && rEX_type === InstrType.ALU) {
+      assert(alu.io.opB === rEX_sext)
+      assert(exResult === alu.io.result)
+      assert(rEX_hasRd)
+    }
+
+    // == LDI (ISA §3.6 / §4.8): result is the second word from instruction ==
+    when(rEX_type === InstrType.LDI) {
+      assert(exResult === rEX_ldiData)
+      assert(rEX_hasRd)
+    }
+
+    // == LD (ISA §3.3 / §4.9): data bus read request with correct address  ==
+    when(rEX_type === InstrType.LD) {
+      assert(io.dataBus.req.valid)
+      assert(!io.dataBus.req.payload.wr)
+      assert(io.dataBus.req.payload.addr === rEX_effAddr.asUInt)
+      assert(rEX_hasRd)
+    }
+
+    // == ST (ISA §3.3 / §4.10): data bus write with correct addr + data   ==
+    when(rEX_type === InstrType.ST) {
+      assert(io.dataBus.req.valid)
+      assert(io.dataBus.req.payload.wr)
+      assert(io.dataBus.req.payload.addr === rEX_effAddr.asUInt)
+      assert(io.dataBus.req.payload.wrData === exFwdRtVal)
+      assert(!rEX_hasRd)
+    }
+
+    // == JMP (ISA §3.4 / §4.11): unconditional, no rd                     ==
+    when(rEX_type === InstrType.JMP) {
+      assert(exBrTaken)
+      assert(!rEX_hasRd)
+    }
+
+    // == Branch Condition Correctness (ISA §3.5 / §4.12–4.14)             ==
+    when(rEX_type === InstrType.BR) {
+      when(rEX_isBEQ) { assert(exBrTaken === (exFwdRsVal === exFwdRtVal)) }
+      when(rEX_isBNE) { assert(exBrTaken === (exFwdRsVal =/= exFwdRtVal)) }
+      when(rEX_isBLT) { assert(exBrTaken === (exFwdRsVal.asSInt < exFwdRtVal.asSInt)) }
+    }
+
+    // ======================================================================
+    // Temporal: EX → WB Transfer (non-LD/ST)
+    // ======================================================================
+    when(pastValid() && resetn) {
+      when(past(rEX_type) =/= InstrType.EMPTY &&
+           past(rEX_type) =/= InstrType.LD &&
+           past(rEX_type) =/= InstrType.ST &&
+           !past(exBrTaken)) {
+        assert(vWB)
+        assert(rWB_rd === past(rEX_rd))
+        assert(rWB_hasRd === past(rEX_hasRd))
+        assert(rWB_result === past(exResult))
+      }
+    }
+
+    // ======================================================================
+    // Temporal: WB → Register File Write
+    // ======================================================================
+    when(vWB && rWB_hasRd) {
+      assert(regFile.io.wrEn === (rWB_rd =/= 0))
+      assert(regFile.io.wrAddr === rWB_rd)
+      assert(regFile.io.wrData === rWB_result)
+    }
+
+    // ======================================================================
+    // Temporal: PC Update After Branch / Jump
+    // ======================================================================
+    when(pastValid() && resetn) {
+      when(past(exBrTaken)) {
+        when(past(rEX_type) === InstrType.JMP) {
+          assert(pc === past(exFwdRsVal).asUInt)
+        }
+        when(past(rEX_type) === InstrType.BR) {
+          assert(pc === past(rEX_brTarget).asUInt)
+        }
+      }
+    }
+
+    // ======================================================================
+    // Temporal: Branch Taken Clears vID and Flushes Pipeline
+    // ======================================================================
+    when(pastValid() && resetn) {
+      when(past(exBrTaken)) {
+        assert(!vID)
+      }
+    }
+
+    // ======================================================================
+    // Temporal: LD State Machine — ldRd Captures rEX_rd on Request Fire
+    // ======================================================================
+    when(pastValid() && resetn) {
+      when(past(rEX_type) === InstrType.LD && past(io.dataBus.req.fire)) {
+        assert(ldRd === past(rEX_rd))
+      }
+    }
+
+    // ======================================================================
+    // Coverage
+    // ======================================================================
+    cover(rEX_type === InstrType.ALU)
+    cover(rEX_type === InstrType.LD)
+    cover(rEX_type === InstrType.LDI)
+    cover(rEX_type === InstrType.ST)
+    cover(rEX_type === InstrType.JMP)
+    cover(rEX_type === InstrType.BR && exBrTaken)
+    cover(rEX_type === InstrType.BR && !exBrTaken)
+    cover(loadUseHazard)
+    cover(ldWaitStall)
+    cover(rEX_aluFunc === B"000")
+    cover(rEX_aluFunc === B"001")
+    cover(rEX_aluFunc === B"010")
+    cover(rEX_aluFunc === B"011")
+    cover(rEX_aluFunc === B"100")
+    cover(rEX_aluFunc === B"101")
+    cover(rEX_aluFunc === B"110")
+    cover(rEX_isBEQ && exBrTaken)
+    cover(rEX_isBNE && exBrTaken)
+    cover(rEX_isBLT && exBrTaken)
+    cover(vWB && rWB_hasRd && rWB_rd =/= 0)
     cover(io.bus.ack)
     cover(io.bus.rsp.valid)
+    cover(io.dataBus.req.fire)
+    cover(io.dataBus.rsp.fire)
+    cover(rEX_type === InstrType.ST && io.dataBus.req.fire)
   }
 }
 

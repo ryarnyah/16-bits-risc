@@ -1,5 +1,4 @@
 ThisBuild / version := "0.1.0-SNAPSHOT"
-ThisBuild / name := "risc-core"
 ThisBuild / organization := "com.github.ryarnyah"
 ThisBuild / scalaVersion := "2.13.18"
 
