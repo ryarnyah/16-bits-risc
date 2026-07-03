@@ -127,7 +127,7 @@
       reach EX after the branch resolves (ID→EX gated by `!exBrTaken`), so no
       speculative LD writeback needs suppression. Without the guard, legitimate
       back-to-back `LD`+`JMP` sequences complete correctly.
-    - Verified: all 24 C tests pass on both PipSoc and multi-cycle core; formal
+    - Verified: all 31 C tests pass on both PipSoc and multi-cycle core; formal
       BMC(30) passes.
 
 ### Verification Results
@@ -138,6 +138,9 @@
 - **Verilator Emulator**: ✓ Compiles and runs, responds to bus commands (LOAD_ADDR, LOAD_DATA, STEP, RUN, READ_REG, READ_MEM, READ_PC)
 - **End-to-end counter program**: ✓ counter.asm loads, loops, counts R3 1..9, BLT branch, resets to 0
 - **C99 Compiler (cc.py)**: ✓ Compiles C programs to RISC assembly, with peephole optimizer and runtime lib (mul/div/mod)
+  - Fixed local array base address: uses `ADDI R1, R6, #off` instead of loading from uninitialized stack slot
+  - Fixed stack allocation: correctly accounts for `array_size * 2` bytes
+  - Fixed for-loop body parsing: `)` token sets `phase = 3` so body is not silently dropped
 - **Assembler (asm.py)**: ✓ `JMP label` pseudo-op emits `LDI R4,#label; JMP R4` (3 words) to avoid ±32-word branch limit
 - **UART program (fib_uart.c)**: ✓ Compiles via cc.py, runs via `make test-fib-uart` with piped input
 
@@ -145,10 +148,15 @@
 
 - **PipSoc Emulator**: ✓ Compiles and runs (pipsoc-emu), separate emulator using PipSoc Verilog
 - **PipCore Formal Verification**: ✓ PipCore passes BMC(30)
-- **End-to-end LD/ST test**: ✓ ldst_test.asm: LDI 42, ST to mem, LD to R2, SUB R2-R1→R3, BEQ loop — R3=0 (correct: 42-42=0)
-- **C compiled tests on PipSoc**: 24/24 pass (all tests pass on both PipSoc and multi-cycle core)
-
-#### ISA Coverage (24 test programs, all pass via `make test-programs`)
+- **C compiled tests on both cores**: **41/41 pass** (all tests pass on both PipSoc and multi-cycle core)
+  - Pipeline patterns: `ld_use_all` (LD→ADD/SUB/AND/OR), `ld_st_addr` (LDI address for ST),
+    `forward_chain` (6-op ALU forwarding), `ldi_burst` (back-to-back LDI),
+    `br_chain` (BEQ/BNE/BLT), `ld_ld_ld` (3 LDs), `st_ld_test` (ST→LD aliasing)
+  - New: `shift_chain` (SLL→SRL forwarding), `addi_chain` (ADDI→ADDI→ADDI),
+    `jmp_reg` (JMP R5 call/return), `not_taken` (branch not-taken + fall-through),
+    `ld_st_mix` (interleaved LD/ST), `ptr_chain` (**pp double dereference),
+    `r0_test` (R0 is always 0), `store_zero` (ST 0 to stack),
+    `loop_array` (local array in for loop), `call_deep` (nested function calls)
 
 | Opcode | Mnemonic | Test |
 |--------|----------|------|

@@ -424,19 +424,24 @@ class CGen:
     def _gen_func(self, f):
         locals = []
         self._collect_locals(f.body, locals)
-        n_local = len(locals)
         n_param = len(f.params)
         n_reg_param = min(n_param, 3)
 
-        # Local offsets: R6 - 2, R6 - 4, ...
-        for i, (n, d) in enumerate(locals):
-            d.off = -2 - i * 2
+        # Local offsets: place arrays with last element at top (near R6),
+        # so that arr[N-1] sits at the slot boundary and arr[0] is below.
+        # Normal scalars occupy one slot (2 bytes).
+        local_bytes = 0
+        for n, d in locals:
+            sz = max(2, d.array_size * 2)
+            d.off = -(local_bytes + sz)
+            local_bytes += sz
+
+        n_local_words = local_bytes // 2
 
         # Register param offsets: below locals
-        # R6 - 2 - n_local*2 (arg1), R6 - 4 - n_local*2 (arg2), ...
         for i, p in enumerate(f.params):
             if i < 3:
-                p.off = -2 - n_local * 2 - i * 2
+                p.off = -2 - local_bytes - i * 2
             else:
                 p.off = 4 + i * 2
             # Register parameter in symbol table
@@ -449,7 +454,7 @@ class CGen:
         for n, d in locals:
             self.globals.put(n, d)
 
-        n_total = n_local + n_reg_param
+        n_total = n_local_words + n_reg_param
 
         self.emit(f';--- {f.name}(...)')
         self.emit_lbl(f.name)
@@ -723,7 +728,11 @@ class CGen:
             if vi:
                 t, o = vi
                 base = 'R6' if t == 'l' else 'R0'
-                self.emit(f'    LD R1, [{base} {o:+d}]')
+                d = self.globals.get(e.name)
+                if d and d.array_size > 0:
+                    self.emit(f'    ADDI R1, {base}, #{o}')
+                else:
+                    self.emit(f'    LD R1, [{base} {o:+d}]')
 
         elif isinstance(e, BinaryOp):
             self._gen_binop(e)

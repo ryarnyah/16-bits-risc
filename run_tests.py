@@ -30,6 +30,23 @@ TESTS = [
     ('fib15.c',        0x262, 300000),  # 610
     ('mod_simple.c',   0x01,  10000),  #   1  (7 % 3)
     ('mod_simple2.c',  0x01,  10000),  #   1  (7 % 3 with locals)
+    ('ld_use_all.c',   0x16,  20000),  #  22
+    ('ld_st_addr.c',   0x2A,  20000),  #  42
+    ('forward_chain.c',0x0B,  20000),  #  11
+    ('ldi_burst.c',    0x258, 20000),  # 600
+    ('br_chain.c',     0x0A,  20000),  #  10
+    ('ld_ld_ld.c',     0x1F,  20000),  #  31
+    ('st_ld_test.c',   0x7B,  20000),  # 123
+    ('shift_chain.c',  0x0C,  20000),  #  12
+    ('addi_chain.c',   0x14,  20000),  #  20
+    ('jmp_reg.c',      0x2A,  20000),  #  42
+    ('not_taken.c',    0x0C,  20000),  #  12
+    ('ld_st_mix.c',    0x64,  20000),  # 100
+    ('ptr_chain.c',    0x2A,  20000),  #  42
+    ('r0_test.c',      0x00,  20000),  #   0
+    ('store_zero.c',   0x00,  20000),  #   0
+    ('loop_array.c',   0x1E,  20000),  #  30
+    ('call_deep.c',    0x15,  20000),  #  21
 ]
 
 def compile_c(c_file):

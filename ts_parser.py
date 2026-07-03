@@ -534,6 +534,8 @@ class TSParser:
             if t in ('for', '(', ')', ';'):
                 if t == ';':
                     phase += 1
+                elif t == ')':
+                    phase = 3
                 continue
             if t == 'declaration':
                 d = self._walk_declaration(child, False)

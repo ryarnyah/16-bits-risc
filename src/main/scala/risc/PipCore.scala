@@ -166,6 +166,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     }
     is(LdPhase.DATA_READY) {
       ldState := LdPhase.IDLE
+      rEX_type := InstrType.EMPTY
     }
   }
 

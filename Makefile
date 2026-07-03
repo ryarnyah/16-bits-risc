@@ -88,7 +88,11 @@ uart: examples/echo.hex emulator
 C_TESTS := minimal multest test fib dec double mulonly \
            or_test bne_test xori_test all_alu_test beq_test ldst_test \
            collatz div_test mod_test sum fib5 fact gcd prime_cnt fib15 \
-           mod_simple mod_simple2
+           mod_simple mod_simple2 \
+           ld_use_all ld_st_addr forward_chain ldi_burst br_chain \
+           ld_ld_ld st_ld_test \
+           shift_chain addi_chain jmp_reg not_taken ld_st_mix \
+           ptr_chain r0_test store_zero loop_array call_deep
 
 test-programs: emulator fib_uart
 	@for t in $(C_TESTS); do \

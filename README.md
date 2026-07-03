@@ -38,7 +38,8 @@ FSM: `FETCH → DECODE → (LDI_FETCH) → WRITEBACK`
 ## Verification
 
 - Formal BMC(30) passes for both cores and all sub-components (ALU, Decoder, RegFile, BusInterface)
-- 24 C test programs pass end-to-end on both cores (collatz, fib, gcd, div, mod, etc.)
+- 31 C test programs pass end-to-end on both cores (collatz, fib, gcd, div, mod, etc.)
+- Targeted tests for pipeline hazards: load-use chaining, ALU forwarding, LDI bursts, branch chains, consecutive loads, ST→LD aliasing
 - Emulator via Verilator; PipSoc emulator for the pipelined SoC
 
 ## Tools
