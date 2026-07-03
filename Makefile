@@ -14,7 +14,7 @@ VERILATOR_ROOT := $(dir $(VERILATOR_BIN))../share/verilator
 VERILATOR_INC := $(VERILATOR_ROOT)/include
 
 .PHONY: all help rtl formal emulator emulator-pipsoc test test-programs \
-        test-programs-pipsoc test-programs-all clean assemble \
+        test-programs-pipsoc test-programs-all bench clean assemble \
         examples/prime.hex examples/echo.hex uart \
         f4pga f4pga_program vendor-f4pga
 
@@ -30,6 +30,9 @@ help:
 	@echo "  test-programs        - Compile & run all C tests via old Soc emulator"
 	@echo "  test-programs-pipsoc - Compile & run all C tests via PipSoc emulator"
 	@echo "  test-programs-all    - Run both emulators and compare results"
+	@echo "  bench                - Run benchmarks on old Soc emulator"
+	@echo "  bench-pipsoc         - Run benchmarks on PipSoc emulator"
+	@echo "  bench-all            - Run benchmarks on both emulators"
 	@echo "  assemble             - Assemble all .asm files in examples/"
 	@echo "  uart                 - Run UART echo demo"
 	@echo "  vendor-f4pga         - Install F4PGA toolchain into vendor/"
@@ -94,22 +97,24 @@ C_TESTS := minimal multest test fib dec double mulonly \
            shift_chain addi_chain jmp_reg not_taken ld_st_mix \
            ptr_chain r0_test store_zero loop_array call_deep
 
+BENCHES := bench_nop bench_alu bench_mem bench_mem2 bench_10 bench_15 bench_small bench_loop
+
 test-programs: emulator fib_uart
-	@for t in $(C_TESTS); do \
+	@for t in $(C_TESTS) $(BENCHES); do \
 		echo "  cc examples/$$t.c -> examples/$$t.hex"; \
 		python3 cc.py examples/$$t.c --hex examples/$$t.hex || exit 1; \
 	done
 	python3 run_tests.py --emulator $(EMULATOR)
 
 test-programs-pipsoc: emulator-pipsoc fib_uart
-	@for t in $(C_TESTS); do \
+	@for t in $(C_TESTS) $(BENCHES); do \
 		echo "  cc examples/$$t.c -> examples/$$t.hex"; \
 		python3 cc.py examples/$$t.c --hex examples/$$t.hex || exit 1; \
 	done
 	python3 run_tests.py --emulator $(EMULATOR_PIPSOC)
 
 test-programs-all: emulator emulator-pipsoc fib_uart
-	@for t in $(C_TESTS); do \
+	@for t in $(C_TESTS) $(BENCHES); do \
 		echo "  cc examples/$$t.c -> examples/$$t.hex"; \
 		python3 cc.py examples/$$t.c --hex examples/$$t.hex || exit 1; \
 	done
@@ -119,6 +124,24 @@ test-programs-all: emulator emulator-pipsoc fib_uart
 	@echo ""
 	@echo "===== PipSoc Emulator ====="
 	python3 run_tests.py --emulator $(EMULATOR_PIPSOC) || true
+
+bench: emulator fib_uart
+	@for t in $(BENCHES); do \
+		echo "  cc examples/$$t.c -> examples/$$t.hex"; \
+		python3 cc.py examples/$$t.c --hex examples/$$t.hex || exit 1; \
+		echo "  Running $$t ..."; \
+		printf 's 500000\nr 1 0\nq\n' | timeout 30s $(EMULATOR) examples/$$t.hex 2>&1 | grep -a 'R1 ='; \
+	done
+
+bench-pipsoc: emulator-pipsoc fib_uart
+	@for t in $(BENCHES); do \
+		echo "  cc examples/$$t.c -> examples/$$t.hex"; \
+		python3 cc.py examples/$$t.c --hex examples/$$t.hex || exit 1; \
+		echo "  Running $$t ..."; \
+		printf 's 500000\nr 1 0\nq\n' | timeout 30s $(EMULATOR_PIPSOC) examples/$$t.hex 2>&1 | grep -a 'R1 ='; \
+	done
+
+bench-all: bench bench-pipsoc
 
 fib_uart: examples/fib_uart.hex
 
@@ -138,7 +161,11 @@ test-programs-clean:
 	      examples/gcd.{asm,hex} examples/prime_cnt.{asm,hex} \
 	      examples/fib15.{asm,hex} examples/mod_simple.{asm,hex} \
 	      examples/mod_simple2.{asm,hex} \
-	      examples/fib_uart.{asm,hex}
+	      examples/fib_uart.{asm,hex} \
+	      examples/bench_nop.{asm,hex} examples/bench_alu.{asm,hex} \
+	      examples/bench_mem.{asm,hex} examples/bench_mem2.{asm,hex} \
+	      examples/bench_10.{asm,hex} examples/bench_15.{asm,hex} \
+	      examples/bench_small.{asm,hex} examples/bench_loop.{asm,hex}
 
 # ======================================================================
 # F4PGA — Basys3 (Artix-7 XC7A35T) FPGA implementation

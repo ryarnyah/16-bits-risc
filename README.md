@@ -8,38 +8,45 @@
 
 FSM: `FETCH → DECODE → (LDI_FETCH) → WRITEBACK`
 
-| Instruction | Cycles | Notes |
-|---|---|---|
-| ALU (ADD, SUB, AND, OR, XOR, SLL, SRL, ADDI, XORI) | 3 | FETCH + DECODE + WRITEBACK |
-| LD (load) | 3 | FETCH + DECODE + WRITEBACK; data RAM response arrives in WRITEBACK |
-| ST (store) | 2 | FETCH + DECODE; no writeback needed |
-| BEQ/BNE/BLT (branch) | 2 | Same whether taken or not |
-| JMP (jump) | 2 | |
-| LDI (2-word immediate) | 4 | FETCH + DECODE + LDI_FETCH + WRITEBACK |
+Buses use **0-cycle** instruction ROM (`readAsync`, combinational) and **1-cycle** data RAM (`readSync` + registered
+valid).
 
-**Estimated average CPI:** ~2.6
+| Instruction                                        | Cycles | State Walk  | Notes                                               |
+|----------------------------------------------------|--------|-------------|-----------------------------------------------------|
+| ALU (ADD, SUB, AND, OR, XOR, SLL, SRL, ADDI, XORI) | 3      | FE→DE→WB    | ALU is combinational in DECODE                      |
+| LD (load)                                          | 3      | FE→DE→WB    | DECODE sends req, WB waits 1 cycle for data bus rsp |
+| ST (store)                                         | 2      | FE→DE       | No writeback; completes when req.fire               |
+| BEQ/BNE/BLT (branch)                               | 2      | FE→DE       | Target computed in DECODE; same whether taken/not   |
+| JMP (jump)                                         | 2      | FE→DE       |                                                     |
+| LDI (2-word immediate)                             | 4      | FE→DE→LI→WB | LI = second instruction fetch for immediate word    |
+
+**Estimated average CPI:** ~2.8
 
 ### Pipelined Core (`PipCore.scala`)
 
 4-stage pipeline: `IF → ID → EX → WB`, with forwarding and hazard detection.
 
-| Instruction | CPI | Notes |
-|---|---|---|
-| ALU | 1 | Full forwarding resolves RAW hazards |
-| ST | 1 | Write in EX |
-| LD (no hazard) | 1 | 2-cycle bus latency hidden by pipeline |
-| LD (load-use) | 2 | +1 stall when next instruction needs loaded register |
-| BEQ/BNE/BLT | 2 | +1 stall from `stallBrId` |
-| JMP | 2 | +1 stall from `stallBrId` |
-| LDI (2-word) | 3 | 2 IF cycles + 1 stall from `stallLdiId` |
+Buses: 0-cycle instruction ROM (`readAsync`), 1-cycle data RAM (`readSync`). The 1-cycle data latency is the dominant
+stall source.
 
-**Estimated average CPI:** ~1.3–1.5
+| Instruction                                        | CPI | Stall Source  | Notes                                                                                    |
+|----------------------------------------------------|-----|---------------|------------------------------------------------------------------------------------------|
+| ALU (ADD, SUB, AND, OR, XOR, SLL, SRL, ADDI, XORI) | 1   | —             | Full forwarding resolves all RAW hazards; no-stall                                       |
+| ST                                                 | 1   | —             | Write in EX; no writeback needed                                                         |
+| LD                                                 | 2   | `ldWaitStall` | +1 cycle for 1-cycle data bus response latency                                           |
+| LD (load-use)                                      | 2   | `ldWaitStall` | Same stall; data written to regfile in DATA_READY before next EX entry, no extra penalty |
+| BEQ/BNE/BLT                                        | 2   | `stallBrId`   | +1 cycle stall of IF while branch resolves in ID                                         |
+| JMP                                                | 2   | `stallBrId`   | Same as branch                                                                           |
+| LDI (2-word)                                       | 3   | `stallLdiId`  | 2 IF cycles (opcode + immediate) + 1 cycle stall of IF while LDI is in ID                |
+
+**Estimated average CPI:** ~1.5
 
 ## Verification
 
 - Formal BMC(30) passes for both cores and all sub-components (ALU, Decoder, RegFile, BusInterface)
 - 31 C test programs pass end-to-end on both cores (collatz, fib, gcd, div, mod, etc.)
-- Targeted tests for pipeline hazards: load-use chaining, ALU forwarding, LDI bursts, branch chains, consecutive loads, ST→LD aliasing
+- Targeted tests for pipeline hazards: load-use chaining, ALU forwarding, LDI bursts, branch chains, consecutive loads,
+  ST→LD aliasing
 - Emulator via Verilator; PipSoc emulator for the pipelined SoC
 
 ## Tools

@@ -465,17 +465,27 @@ class CGen:
         self.emit('    ADD R6, R7, R0')
         self.emit('    ADDI R6, R6, #2')
         if n_total > 0:
-            self.emit(f'    ADDI R7, R7, #{-n_total * 2}')
+            off = -n_total * 2
+            if -32 <= off <= 31:
+                self.emit(f'    ADDI R7, R7, #{off}')
+            else:
+                self.emit(f'    LDI R2, #{off}')
+                self.emit(f'    ADD R7, R7, R2')
         for i, p in enumerate(f.params):
             if i < 3:
-                self.emit(f'    ST R{i+2}, [R6 {p.off:+d}]')
+                self._emit_st('R6', p.off, f'R{i+2}')
         self.emit()
 
         self._gen_block(f.body, f.name, None, None)
 
         self.emit_lbl(f'{f.name}_epi')
         if n_total > 0:
-            self.emit(f'    ADDI R7, R7, #{n_total * 2}')
+            off = n_total * 2
+            if -32 <= off <= 31:
+                self.emit(f'    ADDI R7, R7, #{off}')
+            else:
+                self.emit(f'    LDI R2, #{off}')
+                self.emit(f'    ADD R7, R7, R2')
         self.emit('    ADDI R7, R7, #2')
         self.emit('    LD R6, [R7]')
         self.emit('    ADDI R7, R7, #2')
@@ -533,7 +543,7 @@ class CGen:
                 if vi:
                     t, o = vi
                     base = 'R6' if t == 'l' else 'R0'
-                    self.emit(f'    ST R1, [{base} {o:+d}]')
+                    self._emit_st(base, o)
 
         elif isinstance(s, ExprStmt):
             if s.expr:
@@ -563,7 +573,12 @@ class CGen:
             inc = self.L('fi')
             end = self.L('fe')
             if s.init:
-                self._gen_stmt(s.init, fn, None, None)
+                if isinstance(s.init, VarDecl):
+                    self._gen_stmt(s.init, fn, None, None)
+                elif isinstance(s.init, Block):
+                    self._gen_block(s.init, fn, None, None)
+                else:
+                    self._gen_expr(s.init)
             self.emit_lbl(check)
             if s.cond:
                 self._gen_cond(s.cond, end, True)
@@ -714,6 +729,33 @@ class CGen:
 
     # ── Expression codegen ──
 
+    def _emit_addr(self, base, offset):
+        if base == 'R0':
+            self._load_r1(offset)
+        elif -32 <= offset <= 31:
+            self.emit(f'    ADDI R1, {base}, #{offset}')
+        else:
+            self.emit(f'    LDI R1, #{offset}')
+            self.emit(f'    ADD R1, R1, {base}')
+
+    def _emit_ld(self, base, offset):
+        if -32 <= offset <= 31:
+            self.emit(f'    LD R1, [{base} {offset:+d}]')
+        else:
+            self._emit_addr(base, offset)
+            self.emit('    LD R1, [R1 + 0]')
+
+    def _emit_st(self, base, offset, val='R1'):
+        if -32 <= offset <= 31:
+            self.emit(f'    ST {val}, [{base} {offset:+d}]')
+        else:
+            self.emit(f'    ST {val}, [R7]')
+            self.emit('    ADDI R7, R7, #-2')
+            self._emit_addr(base, offset)
+            self.emit('    ADDI R7, R7, #2')
+            self.emit('    LD R2, [R7]')
+            self.emit('    ST R2, [R1 + 0]')
+
     def _gen_expr(self, e):
         cv = self._const_val(e)
         if cv is not None:
@@ -730,9 +772,9 @@ class CGen:
                 base = 'R6' if t == 'l' else 'R0'
                 d = self.globals.get(e.name)
                 if d and d.array_size > 0:
-                    self.emit(f'    ADDI R1, {base}, #{o}')
+                    self._emit_addr(base, o)
                 else:
-                    self.emit(f'    LD R1, [{base} {o:+d}]')
+                    self._emit_ld(base, o)
 
         elif isinstance(e, BinaryOp):
             self._gen_binop(e)
@@ -901,7 +943,7 @@ class CGen:
                 if vi:
                     t, o = vi
                     if t == 'l':
-                        self.emit(f'    ADDI R1, R6, #{o}')
+                        self._emit_addr('R6', o)
                     else:
                         self._load_r1(o)
             elif isinstance(e.expr, ArraySub):
@@ -944,7 +986,7 @@ class CGen:
                 if vi:
                     t, o = vi
                     base = 'R6' if t == 'l' else 'R0'
-                    self.emit(f'    ST R1, [{base} {o:+d}]')
+                    self._emit_st(base, o)
         elif op in ('++post', '--post'):
             delta = 1 if op == '++post' else -1
             if isinstance(e.expr, VarRef):
@@ -952,9 +994,9 @@ class CGen:
                 if vi:
                     t, o = vi
                     base = 'R6' if t == 'l' else 'R0'
-                    self.emit(f'    LD R1, [{base} {o:+d}]')
+                    self._emit_ld(base, o)
                     self.emit(f'    ADDI R2, R1, #{delta}')
-                    self.emit(f'    ST R2, [{base} {o:+d}]')
+                    self._emit_st(base, o, 'R2')
         else:
             self._gen_expr(e.expr)
 
@@ -970,7 +1012,7 @@ class CGen:
                     bo = mapping[op]
                     t, o = vi
                     base = 'R6' if t == 'l' else 'R0'
-                    self.emit(f'    LD R1, [{base} {o:+d}]')
+                    self._emit_ld(base, o)
                     self.emit('    ST R1, [R7]')
                     self.emit('    ADDI R7, R7, #-2')
                     self._gen_expr(e.rhs)
@@ -980,7 +1022,7 @@ class CGen:
                            TOK_PIPE: 'OR', TOK_CARET: 'XOR'}
                     if bo in alu:
                         self.emit(f'    {alu[bo]} R1, R2, R1')
-                    self.emit(f'    ST R1, [{base} {o:+d}]')
+                    self._emit_st(base, o)
                 return
             return
 
@@ -991,7 +1033,7 @@ class CGen:
             if vi:
                 t, o = vi
                 base = 'R6' if t == 'l' else 'R0'
-                self.emit(f'    ST R1, [{base} {o:+d}]')
+                self._emit_st(base, o)
         elif isinstance(e.lhs, ArraySub):
             self._gen_expr(e.lhs.arr)
             self.emit('    ST R1, [R7]')
@@ -1032,7 +1074,12 @@ class CGen:
         self.emit(f'    JMP R1')
         self.emit_lbl(ret)
         if n > 3:
-            self.emit(f'    ADDI R7, R7, #{(n - 3) * 2}')
+            off = (n - 3) * 2
+            if -32 <= off <= 31:
+                self.emit(f'    ADDI R7, R7, #{off}')
+            else:
+                self.emit(f'    LDI R1, #{off}')
+                self.emit(f'    ADD R7, R7, R1')
 
     # ── Runtime routines ──
 

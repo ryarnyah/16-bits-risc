@@ -416,10 +416,11 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "RISC PipSoc Emulator ready. Commands:\n"
-              << "  s [n]    - step n ticks (default 1000), show PC after\n"
+              << "  s [n]    - step n ticks (default 1000), show PC/cycles after\n"
               << "  r [n]    - read register n (default 0)\n"
               << "  m [addr] - read memory at addr (default 0)\n"
               << "  p        - read PC\n"
+              << "  c        - read cycle count\n"
               << "  D        - dump pipeline state\n"
               << "  g        - go (continuous run)\n"
               << "  q        - quit\n";
@@ -444,9 +445,11 @@ int main(int argc, char** argv) {
             std::cout << "PC=0x" << std::hex << emu.readPC() << std::dec
                       << "  R1=0x" << std::hex << r1_s << std::dec
                       << "  R7=0x" << std::hex << emu.readReg(7) << std::dec
-                      << "  R3=0x" << std::hex << r3_s << std::dec << "\n";
-            fprintf(stderr, "[DBG-s] R1=0x%04x R2=0x%04x R3=0x%04x R4=0x%04x\n",
-                r1_s, r2_s, r3_s, r4_s);
+                      << "  R3=0x" << std::hex << r3_s << std::dec
+                      << "  cycles=" << std::dec << emu.readCycle() << "\n";
+        }
+        else if (cmd == 'c') {
+            std::cout << "cycles=" << std::dec << emu.readCycle() << "\n";
         }
         else if (cmd == 'r') {
             int reg = 0;

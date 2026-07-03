@@ -549,7 +549,10 @@ class TSParser:
             if phase == 0:
                 init = self._walk_expr(child)
             elif phase == 1:
-                cond = self._walk_expr(child)
+                if cond is None:
+                    cond = self._walk_expr(child)
+                else:
+                    inc = self._walk_expr(child)
             elif phase == 2:
                 inc = self._walk_expr(child)
             else:

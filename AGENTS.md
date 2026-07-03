@@ -130,6 +130,22 @@
     - Verified: all 31 C tests pass on both PipSoc and multi-cycle core; formal
       BMC(30) passes.
 
+16. **ADDI offset overflow fix** (cc.py):
+    - Bug: `ADDI Rd, Rs, #imm6` with offset outside ±32 range was silently
+      truncated by the assembler (`-34 & 0x3F = 30`, encoding +30 instead
+      of -34). This caused the stack pointer (R7) to point into I/O space
+      (≥0x1FFC), making all subsequent LD/ST access the UART instead of
+      data RAM, causing program hangs/wrong results.
+    - Fix: replaced direct `ADDI` emissions with range check + LDI+ADD
+      fallback (via R2 to avoid clobbering R1 return value in epilogue) in:
+      - Prologue stack allocation (`_gen_func`, line 467-468)
+      - Epilogue stack deallocation (`_gen_func`, line 477-478)
+      - VarRef array base address (`_gen_expr`, line 775)
+      - `&var` address-of operator (`_gen_unop`, line 946)
+      - Function call stack cleanup (`_gen_call`, line 1077)
+    - Verified: all 41 C tests pass on both emulators, bench_15.c (15-element
+      array, offset -34 for sum) correctly returns 0x69.
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully

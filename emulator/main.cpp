@@ -316,10 +316,11 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "RISC Soc Emulator ready. Commands:\n"
-              << "  s [n]    - step n ticks (default 1000), show PC after\n"
+              << "  s [n]    - step n ticks (default 1000), show PC/cycles after\n"
               << "  r [n]    - read register n (default 0)\n"
               << "  m [addr] - read memory at addr (default 0)\n"
               << "  p        - read PC\n"
+              << "  c        - read cycle count\n"
               << "  g        - go (continuous run with UART I/O)\n"
               << "  q        - quit\n";
 
@@ -337,7 +338,11 @@ int main(int argc, char** argv) {
             if (pos != std::string::npos) n = std::stoi(line.substr(pos + 1));
             emu.run(n);
             std::cout << "PC=0x" << std::hex << emu.readPC() << std::dec
-                      << "  R3=0x" << emu.readReg(3) << std::dec << "\n";
+                      << "  R3=0x" << emu.readReg(3) << std::dec
+                      << "  cycles=" << std::dec << emu.readCycle() << "\n";
+        }
+        else if (cmd == 'c') {
+            std::cout << "cycles=" << std::dec << emu.readCycle() << "\n";
         }
         else if (cmd == 'r') {
             int reg = 0;

@@ -29,7 +29,7 @@ main:
     ADDI R6, R6, #2
     ADDI R7, R7, #-2
 
-    ADDI R1, R0, #0
+    XOR R1, R0, R0
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -44,7 +44,7 @@ main:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    ADDI R1, R0, #0
+    XOR R1, R0, R0
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -59,7 +59,7 @@ main:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    ADDI R1, R0, #0
+    XOR R1, R0, R0
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #2
@@ -74,7 +74,7 @@ main:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    ADDI R1, R0, #0
+    XOR R1, R0, R0
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #3
@@ -89,7 +89,7 @@ main:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    ADDI R1, R0, #0
+    XOR R1, R0, R0
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
