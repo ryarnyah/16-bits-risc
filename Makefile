@@ -14,9 +14,10 @@ VERILATOR_ROOT := $(dir $(VERILATOR_BIN))../share/verilator
 VERILATOR_INC := $(VERILATOR_ROOT)/include
 
 .PHONY: all help rtl formal emulator emulator-pipsoc test test-programs \
-        test-programs-pipsoc test-programs-all bench clean assemble \
+        test-programs-pipsoc test-programs-all bench bench-pipsoc bench-all \
+        test-fib-uart test-programs-clean clean assemble \
         examples/prime.hex examples/echo.hex uart \
-        f4pga f4pga_program vendor-f4pga
+        f4pga f4pga-pipsoc f4pga_program f4pga_program_pipsoc vendor-f4pga
 
 all: rtl formal emulator emulator-pipsoc
 
@@ -36,8 +37,10 @@ help:
 	@echo "  assemble             - Assemble all .asm files in examples/"
 	@echo "  uart                 - Run UART echo demo"
 	@echo "  vendor-f4pga         - Install F4PGA toolchain into vendor/"
-	@echo "  f4pga                - Full FPGA flow (synth + PnR + bitstream)"
-	@echo "  f4pga_program        - Program Basys3 via openFPGALoader (needs HW)"
+	@echo "  f4pga                - FPGA flow for multi-cycle core (synth+PnR+bitstream)"
+	@echo "  f4pga-pipsoc         - FPGA flow for pipelined core"
+	@echo "  f4pga_program        - Program Basys3 with multi-cycle bitstream"
+	@echo "  f4pga_program_pipsoc - Program Basys3 with pipelined bitstream"
 	@echo "  clean                - Remove all build artifacts"
 
 rtl:
@@ -425,6 +428,57 @@ $(F4PGA_BIT): $(F4PGA_FASM) $(XC7FRAMES2BIT) $(FASM_STUB)
 
 f4pga_program: $(F4PGA_BIT)
 	@echo "[F4PGA] Programming Basys3 ..."
+	$(if $(call f4pga_tool,openFPGALoader), \
+		$(call f4pga_tool,openFPGALoader) -b basys3 $<, \
+		$(error openFPGALoader not found. Run 'make vendor-f4pga' or install manually))
+	@echo "[F4PGA] Done."
+
+# ── PipSoc FPGA flow (pipelined core, same toolchain) ──────────────────
+
+F4PGA_PIPSOC_XDC := f4pga/basys3_pipsoc.xdc
+
+f4pga-pipsoc: $(F4PGA_DIR)/PipSoc.bit
+	@echo "[F4PGA] PipSoc FPGA flow complete. Use 'make f4pga_program_pipsoc' to program."
+
+$(F4PGA_DIR)/PipSoc.json: $(TARGET_DIR)/PipSoc.sv
+	mkdir -p $(F4PGA_DIR)
+	@echo "[F4PGA] Synthesizing $(F4PGA_DEVICE):$(F4PGA_PART) top=PipSoc ..."
+	$(if $(call f4pga_tool,yosys), \
+		$(call f4pga_tool,yosys) \
+			-p "synth_xilinx -flatten -abc9 -arch xc7 -top PipSoc; \
+				delete {t:\$$scopeinfo}; \
+				opt_expr -keepdc; opt_clean -purge; \
+				write_json $@" $< \
+			-l $(F4PGA_DIR)/synth_pipsoc.log, \
+		$(error yosys not found. Install Yosys or run 'make vendor-f4pga'))
+	@echo "[F4PGA] Synthesis done."
+
+$(F4PGA_DIR)/PipSoc.fasm: $(F4PGA_DIR)/PipSoc.json $(F4PGA_CHIPDB) $(F4PGA_PIPSOC_XDC)
+	@echo "[F4PGA] Place-and-route PipSoc ..."
+	$(if $(call f4pga_tool,nextpnr-xilinx), \
+		$(call f4pga_tool,nextpnr-xilinx) --chipdb $(F4PGA_CHIPDB) \
+			--json $< --xdc $(F4PGA_PIPSOC_XDC) \
+			--write $(F4PGA_DIR)/PipSoc.pnr --fasm $@, \
+		$(error nextpnr-xilinx not found. Run 'make vendor-f4pga' first))
+	@echo "[F4PGA] PnR done."
+
+$(F4PGA_DIR)/PipSoc.bit: $(F4PGA_DIR)/PipSoc.fasm $(XC7FRAMES2BIT) $(FASM_STUB)
+	@echo "[F4PGA] Assembling bitstream PipSoc ($(F4PGA_PART)) ..."
+	PYTHONPATH=$(abspath $(FASM_STUB)):$(abspath $(PRJXRAY_SRC)):$$PYTHONPATH \
+		python3 $(abspath $(PRJXRAY_SRC))/utils/fasm2frames.py \
+			--db-root $(abspath $(F4PGA_DB))/$(F4PGA_DEVICE) \
+			--part $(F4PGA_PART) \
+			--sparse \
+			$(abspath $(F4PGA_DIR)/PipSoc.fasm) $(abspath $(F4PGA_DIR)/PipSoc.frm)
+	$(abspath $(XC7FRAMES2BIT)) \
+		--frm_file $(abspath $(F4PGA_DIR)/PipSoc.frm) \
+		--output_file $(abspath $@) \
+		--part_name $(F4PGA_PART) \
+		--part_file $(abspath $(F4PGA_DB))/$(F4PGA_DEVICE)/$(F4PGA_PART)/part.yaml
+	@echo "[F4PGA] Bitstream: $@"
+
+f4pga_program_pipsoc: $(F4PGA_DIR)/PipSoc.bit
+	@echo "[F4PGA] Programming Basys3 with PipSoc ..."
 	$(if $(call f4pga_tool,openFPGALoader), \
 		$(call f4pga_tool,openFPGALoader) -b basys3 $<, \
 		$(error openFPGALoader not found. Run 'make vendor-f4pga' or install manually))
