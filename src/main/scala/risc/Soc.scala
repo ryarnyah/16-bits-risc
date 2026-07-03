@@ -74,6 +74,7 @@ class Soc(hexPath: String = "") extends Component {
   when(core.io.dataBus.req.fire && isIoAddr && !core.io.dataBus.req.wr) {
     uartReadPending := True
   }
+  // If RX FIFO already has data, consume immediately (no extra cycle)
   when(uartReadPending && uart.io.rxVld) {
     uartRdData := uart.io.rxData
     uartRspVld := True

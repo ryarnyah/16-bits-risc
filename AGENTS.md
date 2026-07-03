@@ -15,6 +15,7 @@
 - [x] PipCore load-use hazard fix: ID→EX gated by `!stallId` (includes hazard stall, not just bus stall), `loadUseWb` covers phase 0 (waiting for bus data)
 - [x] PipCore formal: BMC(30) passes
 - [x] PipCore LD/ST end-to-end: ldst_test.asm (LDI→ST→LD→SUB) passes, R3=0
+- [x] PipCore all 24 C tests pass (PipSoc): collatz fix — ldWbVld not cleared on exBrTaken
 
 ### Design Decisions
 
@@ -99,6 +100,36 @@
     - Debug bus consolidated: `flsPipeline()` helper for cmds 0x03/0x04/0x05
     - Formal BMC(30) passes with comprehensive assertions
 
+14. **PipCore stallBrId fix — vClr/Mux ordering bug** (PipCore.scala):
+    - Added `stallBrId`: when a branch/JMP is in ID, stall IF to prevent
+      speculative fetch of sequential instructions that would need flushing.
+    - Bug: `when(!io.instrRsp.fire) { vID := False }` (vClr) fires before the
+      `Mux(vID, idType, EMPTY)` reads vID in the same cycle. When stallBrId
+      stalls IF, vClr clears vID to 0, and the Mux sees vID=0 → rEX_type =
+      EMPTY, losing the branch/JMP instruction.
+    - Fix: replaced the Mux with a nested `when(vID) / otherwise` structure.
+      The outer `when(!stallID && !exBrTaken)` fires unconditionally (for the
+      no-stall/no-flush case), but the `when(vID)` guard enters the transfer
+      block *before* vClr can clear vID. If vClr fires inside the block, the
+      transfer already committed. The `otherwise` branch clears rEX_type to
+      EMPTY when vID=0, preventing stale LD/ST from re-triggering bus requests.
+    - Verified: addloop.asm BLT loop works (R3=3); C tests 4/24 pass on
+      PipSoc (up from 2/24); standalone 24/24 pass; formal BMC(30) passes
+
+15. **PipCore collatz fix — ldWbVld cleared by exBrTaken** (PipCore.scala):
+    - Bug: `exBrTaken` unconditionally cleared `ldWbVld := False`, killing LD
+      writeback when `JMP R5` immediately followed `LD R6,[R7]` (as in
+      `__mul16` epilogue). The bus response arrived after `ldWbVld` was cleared,
+      so `ldWbFiring = ldRspPending && ldWbVld` was False and R6 never restored.
+      This corrupted the frame pointer in `__mul16`, causing `collatz.c` to
+      return 0x51 (81) instead of 0x6F (111).
+    - Fix: removed `ldWbVld := False` from the `exBrTaken` block. A LD can only
+      reach EX after the branch resolves (ID→EX gated by `!exBrTaken`), so no
+      speculative LD writeback needs suppression. Without the guard, legitimate
+      back-to-back `LD`+`JMP` sequences complete correctly.
+    - Verified: all 24 C tests pass on both PipSoc and multi-cycle core; formal
+      BMC(30) passes.
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully
@@ -115,7 +146,7 @@
 - **PipSoc Emulator**: ✓ Compiles and runs (pipsoc-emu), separate emulator using PipSoc Verilog
 - **PipCore Formal Verification**: ✓ PipCore passes BMC(30)
 - **End-to-end LD/ST test**: ✓ ldst_test.asm: LDI 42, ST to mem, LD to R2, SUB R2-R1→R3, BEQ loop — R3=0 (correct: 42-42=0)
-- **C compiled tests on PipSoc**: 2/24 pass (mulonly, div_test) — **pre-existing failures** (PipCore was always broken for C tests; old multi-cycle Core passes all 24)
+- **C compiled tests on PipSoc**: 24/24 pass (all tests pass on both PipSoc and multi-cycle core)
 
 #### ISA Coverage (24 test programs, all pass via `make test-programs`)
 

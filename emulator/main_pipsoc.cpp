@@ -509,11 +509,13 @@ int main(int argc, char** argv) {
                 auto rWB_result = r->PipSoc__DOT__core__DOT__rWB_result;
                 auto ldData = r->PipSoc__DOT__core__DOT__ldData;
                 auto rspVld = r->PipSoc__DOT__ramRspVld;
+                auto ldWbVld = (unsigned int)r->PipSoc__DOT__core__DOT__ldWbVld;
                 auto r1_val = emu.readReg(1);
                 auto r2_val = emu.readReg(2);
                 auto r3_val = emu.readReg(3);
-                printf("[%ld] PC=%04x exV=%d ALU=%d LD=%d ST=%d rd=%d rs=%d rt=%d br=%d rspF=%d alu=%04x wbRs=%04x stl=%d ldA=%d wbRd=%d wbH=%d ldPh=%d wbLd=%04x rspV=%d R1=%04x R2=%04x R3=%04x\n",
+                printf("[%ld] PC=%04x exV=%d ALU=%d LD=%d ST=%d rd=%d rs=%d rt=%d br=%d reqF=%d rspF=%d alu=%04x wbRs=%04x stl=%d ldA=%d wbRd=%d wbH=%d ldPh=%d wbLd=%04x rspV=%d wbV=%d R1=%04x R2=%04x R3=%04x\n",
                     (long)emu.readCycle(), pc_, exVld, exIsALU, exIsLD, exIsST, rEX_rd, exRsAddr, exRtAddr, exBrTaken,
+                    reqFire,
                     rspFire, aluRes, rWB_result, stallID, ldActive, rWB_rd, rWB_hasRd, (int)ldState,
                     ldData, rspVld, r1_val, r2_val, r3_val);
             }

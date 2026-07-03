@@ -106,8 +106,11 @@ class Uart extends Component {
         rxReg((rxBit - 1).resize(3 bits)) := io.rx
       }
       when(rxBit === 9) {
-        rxFifo.io.push.valid := True
-        rxFifo.io.push.payload := rxReg
+        // Framing error check: stop bit must be high (1)
+        when(io.rx) {
+          rxFifo.io.push.valid := True
+          rxFifo.io.push.payload := rxReg
+        } // else: framing error - silently drop frame
         rxBusy := False
       }
     }

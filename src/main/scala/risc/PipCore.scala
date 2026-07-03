@@ -103,12 +103,13 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val ldRd = Reg(UInt(3 bits))
   private val ldData = Reg(Bits(16 bits))
   private val ldState = Reg(LdPhase()) init LdPhase.IDLE
+  private val ldWbVld = Reg(Bool()) init False // valid flag for LD writeback, decoupled from rEX_type
   private val ldPending = ldState === LdPhase.WAIT_BUS
   private val ldRspPending = ldState === LdPhase.DATA_READY
   io.dataBus.rsp.ready := ldPending
 
   // Forwarding from WB stage (used by both ID address and EX ALU forwarding)
-  private val fwdFromWb = rWB_hasRd && rWB_rd =/= 0
+  private val fwdFromWb = vWB && rWB_hasRd && rWB_rd =/= 0
 
   // =========================================================================
   // ID-stage Address Computations
@@ -116,15 +117,24 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val idSext = decoder.io.imm6.asSInt.resize(16).asBits
   // Forwarding for address computation: LD/ST use rs+imm6, but rs may be
   // updated by the instruction currently in EX (ALU/LDI) or WB/LD.
-  private val idFwdRsVal = Mux(fwdFromWb && rWB_rd === idRsAddr,
-    rWB_result,
-    Mux(ldRspPending && ldRd === idRsAddr && ldRd =/= 0,
-      ldData,
-      Mux(rEX_type === InstrType.ALU && rEX_hasRd && rEX_rd === idRsAddr && rEX_rd =/= 0,
-        alu.io.result,
-        Mux(rEX_type === InstrType.LDI && rEX_hasRd && rEX_rd === idRsAddr && rEX_rd =/= 0,
-          rEX_ldiData,
+  private val idFwdRsVal = Mux(rEX_type === InstrType.ALU && rEX_hasRd && rEX_rd === idRsAddr && rEX_rd =/= 0,
+    alu.io.result,
+    Mux(rEX_type === InstrType.LDI && rEX_hasRd && rEX_rd === idRsAddr && rEX_rd =/= 0,
+      rEX_ldiData,
+      Mux(ldRspPending && ldRd === idRsAddr && ldRd =/= 0,
+        ldData,
+        Mux(fwdFromWb && rWB_rd === idRsAddr,
+          rWB_result,
           regFile.io.rsVal))))
+  private val idFwdRtVal = Mux(rEX_type === InstrType.ALU && rEX_hasRd && rEX_rd === idRtAddr && rEX_rd =/= 0,
+    alu.io.result,
+    Mux(rEX_type === InstrType.LDI && rEX_hasRd && rEX_rd === idRtAddr && rEX_rd =/= 0,
+      rEX_ldiData,
+      Mux(ldRspPending && ldRd === idRtAddr && ldRd =/= 0,
+        ldData,
+        Mux(fwdFromWb && rWB_rd === idRtAddr,
+          rWB_result,
+          regFile.io.rtVal))))
   private val idEffAddr = (idFwdRsVal.asSInt + idSext.asSInt).asBits.resized
   private val idBrShifted = idSext(14 downto 0) ## B"0"
   private val idBrTarget = (rID_pc.asSInt + 2 + idBrShifted.asSInt).asBits.resized
@@ -145,6 +155,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
       when(rEX_type === InstrType.LD && io.dataBus.req.fire) {
         ldRd := rEX_rd
         ldState := LdPhase.WAIT_BUS
+        ldWbVld := True
       }
     }
     is(LdPhase.WAIT_BUS) {
@@ -154,15 +165,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
       }
     }
     is(LdPhase.DATA_READY) {
-      // A NEW LD entering EX from ID starts a new transaction; the LD just
-      // completed (still showing rEX_type === LD) must NOT fire another
-      // request — req.valid is gated by !ldRspPending for LD (see below).
-      when(vID && decoder.io.isLD) {
-        ldRd := decoder.io.rdField.asUInt
-        ldState := LdPhase.WAIT_BUS
-      } otherwise {
-        ldState := LdPhase.IDLE
-      }
+      ldState := LdPhase.IDLE
     }
   }
 
@@ -172,25 +175,40 @@ case class PipCore() extends Component with CoreBusIoComponent {
 
   // Load-use hazard: EX has LD that writes a register needed by ID
   private val idNeedsRs = vID && !decoder.io.isLDI
-  private val idNeedsRt = vID && (decoder.io.isALU || decoder.io.isST || decoder.io.isBranch)
+  private val idNeedsRt = vID && (decoder.io.isALU || decoder.io.isST || decoder.io.isBranch) && !decoder.io.isImmEn
   private val loadUseHazard = rEX_type === InstrType.LD && !ldRspPending && rEX_hasRd && rEX_rd =/= 0 &&
     ((idNeedsRs && idRsAddr === rEX_rd) || (idNeedsRt && idRtAddr === rEX_rd))
   private val ldWaitStall = rEX_type === InstrType.LD && ldPending && !ldRspPending
-  private val stallID = loadUseHazard || ldWaitStall
-  private val stallIF = stallID
+  // Stall a new LD from entering EX while a previous LD's data is in
+  // DATA_READY.  Without this, ID→EX fires in the same cycle as the
+  // DATA_READY→IDLE transition, and the new LD's req.fire hits after
+  // the writeback but before the regfile update — safe for forwarding,
+  // but the next instruction (if not LD) could see the old LD lingering.
+  private val ldRespNow = ldState === LdPhase.WAIT_BUS && io.dataBus.rsp.fire
+  private val ldActiveStall = (ldRspPending || ldRespNow) && vID && decoder.io.isLD
+  // Stall IF when a branch/JMP is in ID — prevents speculative fetch of
+  // sequential instructions that would become stale if the branch is taken.
+  private val stallBrId = vID && (decoder.io.isBranch || decoder.io.isJMP)
+  private val stallLdiId = vID && decoder.io.isLDI
+  private val stallID = loadUseHazard || ldWaitStall || ldActiveStall
+  private val stallIF = stallID || stallBrId || stallLdiId
 
   // =========================================================================
   // Forwarding and Branch Detection
   // =========================================================================
 
-  private val exFwdRsVal = Mux(fwdFromWb && rWB_rd === exRsAddr,
+  // Self-forwarding guard: when the same instruction is stalled in EX,
+  // EX→WB keeps writing its result to rWB each cycle.  Without this guard,
+  // the WB→EX forwarding feeds the ALU input and creates an arithmetic
+  // loop (e.g. ADDI R7,R7,#2 would add 2 every stall cycle).
+  private val exFwdRsVal = Mux(fwdFromWb && rWB_rd === exRsAddr && !(rEX_hasRd && rWB_rd === rEX_rd),
     rWB_result,
-    Mux(ldRspPending && ldRd === exRsAddr,
+    Mux(ldRspPending && ldRd === exRsAddr && ldRd =/= 0,
       ldData,
       rEX_rsVal))
-  private val exFwdRtVal = Mux(fwdFromWb && rWB_rd === exRtAddr,
+  private val exFwdRtVal = Mux(fwdFromWb && rWB_rd === exRtAddr && !(rEX_hasRd && rWB_rd === rEX_rd),
     rWB_result,
-    Mux(ldRspPending && ldRd === exRtAddr,
+    Mux(ldRspPending && ldRd === exRtAddr && ldRd =/= 0,
       ldData,
       rEX_rtVal))
 
@@ -213,27 +231,35 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val instrIsLDI = io.instrRsp.payload(15 downto 12) === B"1111"
 
   when(io.instrRsp.fire) {
-    when(instrIsLDI && !ldiPending) {
-      ldiPending := True
-      ldiHeader := io.instrRsp.payload
-      ldiHeaderPc := pc
-      pc := pc + 2
-      vID := False
-    } otherwise {
-      when(ldiPending) {
-        rID_instr := ldiHeader
-        rID_pc := ldiHeaderPc
-        rID_ldiData := io.instrRsp.payload
-        vID := True
-        ldiPending := False
+    // Guard against stale bus responses arriving after a branch redirects
+    // PC.  When exBrTaken is True the response is for the sequential address
+    // (already in flight before the branch) and must be discarded.
+    when(!exBrTaken) {
+      when(instrIsLDI && !ldiPending) {
+        ldiPending := True
+        ldiHeader := io.instrRsp.payload
+        ldiHeaderPc := pc
         pc := pc + 2
+        vID := False
       } otherwise {
-        rID_instr := io.instrRsp.payload
-        rID_pc := pc
-        rID_ldiData := 0
-        vID := True
-        pc := pc + 2
+        when(ldiPending) {
+          rID_instr := ldiHeader
+          rID_pc := ldiHeaderPc
+          rID_ldiData := io.instrRsp.payload
+          vID := True
+          ldiPending := False
+          pc := pc + 2
+        } otherwise {
+          rID_instr := io.instrRsp.payload
+          rID_pc := pc
+          rID_ldiData := 0
+          vID := True
+          pc := pc + 2
+        }
       }
+    } otherwise {
+      // Stale response after branch: discard, clear stale LDI state.
+      ldiPending := False
     }
   } otherwise {
     when(!stallIF && !ldiPending) {
@@ -263,12 +289,6 @@ case class PipCore() extends Component with CoreBusIoComponent {
     Mux(rEX_type === InstrType.ALU || exIsImmEn, alu.io.result, B(0, 16 bits)))
 
   // Data bus request (combinational).
-  // Gate LD req.valid with !ldRspPending (DATA_READY) to prevent the cycle
-  // after a LD completes from generating a spurious request.  The LD that
-  // just finished still shows rEX_type === LD (before ID→EX updates it),
-  // and the request would fire with the same addr — harmless in isolation,
-  // but the unconsumed response pollutes the bus and gets consumed by the
-  // next LD, loading stale data from the wrong address.
   io.dataBus.req.payload.addr := rEX_effAddr.asUInt
   io.dataBus.req.payload.wrData := exFwdRtVal
   io.dataBus.req.payload.wr := rEX_type === InstrType.ST
@@ -282,7 +302,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // Default: no new WB data
   vWB := False
 
-  // Non-LD/ST: transfer every cycle
+  // Non-LD/ST: transfer every cycle (no stall guard — ID→EX stalls handle
+  // load-use hazards; general RAW hazards are resolved via forwarding).
   when(rEX_type =/= InstrType.EMPTY && rEX_type =/= InstrType.LD && rEX_type =/= InstrType.ST && !exBrTaken) {
     rWB_rd := rEX_rd
     rWB_hasRd := rEX_hasRd
@@ -290,15 +311,19 @@ case class PipCore() extends Component with CoreBusIoComponent {
     vWB := True
   }
 
-  // LD: transfer when FSM is in DATA_READY state.
-  // Guard with rEX_type === LD to prevent overwriting a newer instruction's
-  // result when a load-use hazard resolves and the dependent instruction
-  // enters EX in the same cycle ldRspPending is still true.
-  when(ldRspPending && rEX_type === InstrType.LD) {
-    rWB_rd := ldRd
-    rWB_hasRd := True
-    rWB_result := ldData
-    vWB := True
+  // LD: direct write to regfile when FSM is in DATA_READY state.
+  // Uses a dedicated path (bypasses rWB) to avoid writeback conflicts
+  // with non-LD instructions that may be in EX concurrently.
+  // Guard with ldWbVld (not rEX_type === LD) because ID→EX may have
+  // overwritten rEX_type before the bus response arrives (no-data-hazard
+  // case: the next instruction doesn't read the loaded register).
+  // ldWbVld is NOT cleared on exBrTaken — a LD can only reach EX after the
+  // branch resolves (ID→EX gated by !exBrTaken), so no speculative LD
+  // writeback needs suppression.  Clearing ldWbVld on exBrTaken kills
+  // legitimate LD+JMP sequences (e.g. __mul16 epilogue).
+  private val ldWbFiring = ldRspPending && ldWbVld
+  when(ldWbFiring) {
+    ldWbVld := False
   }
 
   // =========================================================================
@@ -327,29 +352,45 @@ case class PipCore() extends Component with CoreBusIoComponent {
     ldiPending := False
   }
 
-  // Normal ID→EX transfer (when no stall and not flushing)
+  // Normal ID→EX transfer (when no stall/flush).  vID is used in an inner
+  // when (not a Mux) to avoid the stallBrId→vClr race: if vClr clears vID
+  // before rEX_type is assigned in the same cycle, a Mux would see vID=0
+  // and kill the branch/JMP transfer.  By nesting, we enter the outer when
+  // unconditionally (for the no-stall/no-flush case) and only gate the
+  // actual transfer on vID.
   when(!stallID && !exBrTaken) {
-    rEX_instr := rID_instr
-    rEX_pc := rID_pc
-    rEX_rd := (decoder.io.hasRd ? decoder.io.rdField | B"000").asUInt
-    rEX_hasRd := decoder.io.hasRd
-    rEX_rsVal := regFile.io.rsVal
-    rEX_rtVal := regFile.io.rtVal
-    rEX_sext := idSext
-    rEX_effAddr := idEffAddr
-    rEX_brTarget := idBrTarget
-    rEX_ldiData := rID_ldiData
+    when(vID) {
+      // Clear vID when IF→ID is not also firing (otherwise the new
+      // instruction from IF would be lost).
+      when(!io.instrRsp.fire) { vID := False }
+      rEX_instr := rID_instr
+      rEX_pc := rID_pc
+      rEX_rd := (decoder.io.hasRd ? decoder.io.rdField | B"000").asUInt
+      rEX_hasRd := decoder.io.hasRd
+      rEX_rsVal := idFwdRsVal
+      rEX_rtVal := idFwdRtVal
+      rEX_sext := idSext
+      rEX_effAddr := idEffAddr
+      rEX_brTarget := idBrTarget
+      rEX_ldiData := rID_ldiData
 
-    rEX_aluFunc := decoder.io.aluFunc
-    rEX_type := Mux(vID, idType, InstrType.EMPTY)
+      rEX_aluFunc := decoder.io.aluFunc
+      rEX_type := idType
+    } otherwise {
+      // Clear rEX_type when ID is empty (vID=0).  Without this, a stale
+      // LD/ST lingering in EX would re-trigger its bus request every cycle
+      // (io.dataBus.req.valid is combinational from rEX_type), causing
+      // duplicate bus transactions.
+      rEX_type := InstrType.EMPTY
+    }
   }
 
   // =========================================================================
-  // WB Stage — Register File Write
+  // WB Stage — Register File Write (with LD direct-write bypass)
   // =========================================================================
-  regFile.io.wrAddr := rWB_rd
-  regFile.io.wrData := rWB_result
-  regFile.io.wrEn := vWB && rWB_hasRd && rWB_rd =/= 0
+  regFile.io.wrAddr := Mux(ldWbFiring && ldRd =/= 0, ldRd, rWB_rd)
+  regFile.io.wrData := Mux(ldWbFiring && ldRd =/= 0, ldData, rWB_result)
+  regFile.io.wrEn := (ldWbFiring && ldRd =/= 0) || (vWB && rWB_hasRd && rWB_rd =/= 0)
 
   // =========================================================================
   // Debug Bus
@@ -454,7 +495,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
       assert(io.dataBus.req.valid)
       assert(io.dataBus.req.payload.wr)
     }
-    // LD req.valid is gated by !ldRspPending (see data bus request logic)
+    // LD req.valid is gated by !ldRspPending (fires only when FSM is not DATA_READY)
     when(rEX_type === InstrType.LD && !ldRspPending) {
       assert(io.dataBus.req.valid)
       assert(!io.dataBus.req.payload.wr)
@@ -500,11 +541,13 @@ case class PipCore() extends Component with CoreBusIoComponent {
       }
     }
 
-    // ldRspPending (DATA_READY) in previous cycle implies vWB is asserted
-    when(pastValid() && resetn) {
-      when(past(ldRspPending)) {
-        assert(vWB)
-      }
+    // ldRspPending && ldWbVld (LD data ready and valid) triggers regfile write
+    // in the same cycle (direct write path bypassing rWB), unless ldRd is 0
+    // (R0 writes are silently ignored per ISA §1).
+    when(ldRspPending && ldWbVld && ldRd =/= 0) {
+      assert(regFile.io.wrEn)
+      assert(regFile.io.wrAddr === ldRd)
+      assert(regFile.io.wrData === ldData)
     }
 
     // ======================================================================
@@ -534,8 +577,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     }
 
     // == LD (ISA §3.3 / §4.9): data bus read request with correct address  ==
-    // req.valid is gated by !ldRspPending to prevent spurious request in
-    // the DATA_READY cycle (see data bus request logic for rationale).
+    // req.valid is gated by !ldRspPending (fires only when FSM is not DATA_READY).
     when(rEX_type === InstrType.LD && !ldRspPending) {
       assert(io.dataBus.req.valid)
       assert(!io.dataBus.req.payload.wr)
@@ -584,9 +626,9 @@ case class PipCore() extends Component with CoreBusIoComponent {
     // Temporal: WB → Register File Write
     // ======================================================================
     when(vWB && rWB_hasRd) {
-      assert(regFile.io.wrEn === (rWB_rd =/= 0))
-      assert(regFile.io.wrAddr === rWB_rd)
-      assert(regFile.io.wrData === rWB_result)
+      assert(regFile.io.wrEn === ((rWB_rd =/= 0) || (ldWbFiring && ldRd =/= 0)))
+      assert(regFile.io.wrAddr === Mux(ldWbFiring && ldRd =/= 0, ldRd, rWB_rd))
+      assert(regFile.io.wrData === Mux(ldWbFiring && ldRd =/= 0, ldData, rWB_result))
     }
 
     // ======================================================================
