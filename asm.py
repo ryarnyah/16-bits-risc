@@ -7,7 +7,7 @@ OPCODES = {
     "ADD":  0, "ADDI": 1, "XOR": 2, "XORI": 3,
     "SUB":  4, "AND":  5, "OR":   6, "SLL":  7,
     "SRL":  8, "LD":   9, "ST":   0xA, "JMP": 0xB,
-    "BEQ": 0xC, "BNE": 0xD, "BLT": 0xE, "BGE": 0xE, "LDI": 0xF,
+    "BEQ": 0xC, "BNE": 0xD, "BLT": 0xE, "LDI": 0xF,
 }
 
 REGS = {f"R{i}": i for i in range(8)}
@@ -27,8 +27,6 @@ def tokenize(line):
     line = re.sub(r";.*", "", line).strip()
     return re.findall(r'\.[A-Za-z_]\w*:|\.[A-Za-z_]\w*|[A-Za-z_]\w*:|[A-Za-z_]\w*|#?[+\-]?\w+|[\[\],:+()]', line)
 
-OPPOSITE_COND = {"BEQ": "BNE", "BNE": "BEQ", "BLT": "BGE"}
-
 def instr_size(toks, relaxed, line_no):
     """Return instruction size in bytes.  relaxed is a set of line numbers
        whose branch instruction should be expanded (relaxed -> 8 bytes)."""
@@ -39,13 +37,13 @@ def instr_size(toks, relaxed, line_no):
     if toks[0] in (".word", ".dw", ".WORD", ".DW"):
         cnt = sum(1 for t in toks[1:] if t != ",")
         return cnt * 2
-    if toks[0] not in OPCODES:
+    if toks[0] not in OPCODES and toks[0] not in ("BGE",):
         return 0
     if toks[0] == "LDI":
         return 4
     if toks[0] == "JMP" and len(toks) > 1 and toks[1] not in REGS:
         return 6  # LDI R4,#label + JMP R4 (3 words)
-    if toks[0] in ("BEQ", "BNE", "BLT") and line_no in relaxed:
+    if toks[0] in ("BEQ", "BNE", "BLT", "BGE") and line_no in relaxed:
         return 8  # 1 word inverted cond + 3 words JMP
     return 2
 
@@ -77,7 +75,7 @@ def compute_relaxed(lines):
             if toks[0].endswith(":"):
                 toks = toks[1:]
             sz = instr_size(toks, relaxed, i)
-            if toks and toks[0] in ("BEQ", "BNE", "BLT"):
+            if toks and toks[0] in ("BEQ", "BNE", "BLT", "BGE"):
                 args = [strip_hash(t) for t in toks[1:] if t not in (",", "[", "]", "+", "#") and t != "+"]
                 if len(args) >= 3 and args[2] in labels:
                     target = labels[args[2]]
@@ -115,8 +113,14 @@ def second_pass(lines, labels, relaxed):
             continue
 
         mnemonic = toks[0]
+        if mnemonic == "BGE":
+            # BGE Rs, Rt, off → BLT Rt, Rs, off (syntactic sugar)
+            mnemonic = "BLT"
+            args_raw = [strip_hash(t) for t in toks[1:] if t not in (",", "[", "]", "+", "#") and t != "+"]
+            args = [args_raw[1], args_raw[0], args_raw[2]] if len(args_raw) >= 3 else args_raw
+        else:
+            args = [strip_hash(t) for t in toks[1:] if t not in (",", "[", "]", "+", "#") and t != "+"]
         op = OPCODES[mnemonic]
-        args = [strip_hash(t) for t in toks[1:] if t not in (",", "[", "]", "+", "#") and t != "+"]
         instr = 0
 
         if op == 0xB:   # JMP Rs  (also accepts label via LDI R4,#label + JMP R4)
