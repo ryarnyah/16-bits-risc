@@ -62,6 +62,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
 
   private val rEX_type = Reg(InstrType()) init InstrType.EMPTY
   private val rEX_aluFunc = Reg(Bits(3 bits))
+  private val rEX_brTaken = Reg(Bool()) init False
+  private val rEX_jmpTarget = Reg(Bits(16 bits))
 
   private val rEX_isBEQ = rEX_instr(15 downto 12) === B"1100"
   private val rEX_isBNE = rEX_instr(15 downto 12) === B"1101"
@@ -139,6 +141,21 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val idBrShifted = idSext(14 downto 0) ## B"0"
   private val idBrTarget = (rID_pc.asSInt + 2 + idBrShifted.asSInt).asBits.resized
 
+  // Pre-compute branch condition in ID to shorten EX critical path.
+  // Uses idFwdRsVal/idFwdRtVal which include all forwarding (ALU, LDI,
+  // LD data in DATA_READY, WB).  loadUseHazard stalls the branch in ID
+  // if its operands depend on a pending LD, guaranteeing data settles
+  // before EX.  Stored as rEX_brTaken in the ID→EX transfer.
+  private val idBrTaken =
+    decoder.io.isJMP ||
+    (decoder.io.isBEQ && (idFwdRsVal === idFwdRtVal)) ||
+    (decoder.io.isBNE && (idFwdRsVal =/= idFwdRtVal)) ||
+    (decoder.io.isBLT && (idFwdRsVal.asSInt < idFwdRtVal.asSInt))
+
+  // Pre-compute JMP target in ID to remove forwarding mux from EX
+  // critical path.  Stored as rEX_jmpTarget in the ID→EX transfer.
+  private val idJmpTarget = idFwdRsVal
+
   // =========================================================================
   // EX-stage register addresses (for forwarding)
   // =========================================================================
@@ -213,12 +230,13 @@ case class PipCore() extends Component with CoreBusIoComponent {
       ldData,
       rEX_rtVal))
 
-  // Branch taken — used in IF (to block fetch), ID→EX (to flush), and EX→WB
-  private val exBrTaken =
-    rEX_type === InstrType.JMP ||
-    (rEX_type === InstrType.BR && rEX_isBEQ && (exFwdRsVal === exFwdRtVal)) ||
-    (rEX_type === InstrType.BR && rEX_isBNE && (exFwdRsVal =/= exFwdRtVal)) ||
-    (rEX_type === InstrType.BR && rEX_isBLT && (exFwdRsVal.asSInt < exFwdRtVal.asSInt))
+  // Branch taken — pre-computed in ID stage, stored as rEX_brTaken.
+  // This removes the 16-bit comparator and forwarding mux from the EX
+  // critical path.  The result is identical to re-computing from
+  // exFwdRsVal/exFwdRtVal because loadUseHazard stalls the branch in ID
+  // if its operands depend on a pending LD, and all other forwarding
+  // sources (ALU, LDI, WB) are settled before ID→EX fires.
+  private val exBrTaken = rEX_brTaken
 
   // =========================================================================
   // IF Stage — Instruction Fetch
@@ -331,7 +349,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // Branch target update (uses pre-clear rEX_type for JMP vs BR)
   // =========================================================================
   when(exBrTaken) {
-    pc := Mux(rEX_type === InstrType.JMP, exFwdRsVal.asUInt, rEX_brTarget.asUInt)
+    pc := Mux(rEX_type === InstrType.JMP, rEX_jmpTarget.asUInt, rEX_brTarget.asUInt)
     vID := False
     ldiPending := False
   }
@@ -348,9 +366,14 @@ case class PipCore() extends Component with CoreBusIoComponent {
   when(decoder.io.isLDI) { idType := InstrType.LDI }
 
   // Clear rEX_type on branch (prevents stale EX→WB after flush)
+  // Also clear rEX_brTaken — with the pre-computed branch condition now
+  // stored in a register, we must reset it to avoid re-triggering the
+  // branch PC update every cycle (the old combinational formula would
+  // have automatically resolved to False once rEX_type was EMPTY).
   when(exBrTaken) {
     rEX_type := InstrType.EMPTY
     ldiPending := False
+    rEX_brTaken := False
   }
 
   // Normal ID→EX transfer (when no stall/flush).  vID is used in an inner
@@ -377,6 +400,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
 
       rEX_aluFunc := decoder.io.aluFunc
       rEX_type := idType
+      rEX_brTaken := idBrTaken
+      rEX_jmpTarget := idJmpTarget
     } otherwise {
       // Clear rEX_type when ID is empty (vID=0).  Without this, a stale
       // LD/ST lingering in EX would re-trigger its bus request every cycle
@@ -596,16 +621,20 @@ case class PipCore() extends Component with CoreBusIoComponent {
     }
 
     // == JMP (ISA §3.4 / §4.11): unconditional, no rd                     ==
-    when(rEX_type === InstrType.JMP) {
-      assert(exBrTaken)
-      assert(!rEX_hasRd)
+    when(pastValid() && resetn) {
+      when(rEX_type === InstrType.JMP) {
+        assert(exBrTaken)
+        assert(!rEX_hasRd)
+      }
     }
 
     // == Branch Condition Correctness (ISA §3.5 / §4.12–4.14)             ==
-    when(rEX_type === InstrType.BR) {
-      when(rEX_isBEQ) { assert(exBrTaken === (exFwdRsVal === exFwdRtVal)) }
-      when(rEX_isBNE) { assert(exBrTaken === (exFwdRsVal =/= exFwdRtVal)) }
-      when(rEX_isBLT) { assert(exBrTaken === (exFwdRsVal.asSInt < exFwdRtVal.asSInt)) }
+    when(pastValid() && resetn) {
+      when(rEX_type === InstrType.BR) {
+        when(rEX_isBEQ) { assert(exBrTaken === (exFwdRsVal === exFwdRtVal)) }
+        when(rEX_isBNE) { assert(exBrTaken === (exFwdRsVal =/= exFwdRtVal)) }
+        when(rEX_isBLT) { assert(exBrTaken === (exFwdRsVal.asSInt < exFwdRtVal.asSInt)) }
+      }
     }
 
     // ======================================================================

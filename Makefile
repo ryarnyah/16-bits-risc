@@ -407,6 +407,7 @@ $(F4PGA_FASM): $(F4PGA_JSON) $(F4PGA_CHIPDB)
 	$(if $(call f4pga_tool,nextpnr-xilinx), \
 		$(call f4pga_tool,nextpnr-xilinx) --chipdb $(F4PGA_CHIPDB) \
 			--json $< --xdc $(F4PGA_XDC) \
+			--freq 100 \
 			--write $(F4PGA_DIR)/Soc.pnr --fasm $@, \
 		$(error nextpnr-xilinx not found. Run 'make vendor-f4pga' first))
 	@echo "[F4PGA] PnR done."
@@ -458,6 +459,7 @@ $(F4PGA_DIR)/PipSoc.fasm: $(F4PGA_DIR)/PipSoc.json $(F4PGA_CHIPDB) $(F4PGA_PIPSO
 	$(if $(call f4pga_tool,nextpnr-xilinx), \
 		$(call f4pga_tool,nextpnr-xilinx) --chipdb $(F4PGA_CHIPDB) \
 			--json $< --xdc $(F4PGA_PIPSOC_XDC) \
+			--freq 100 \
 			--write $(F4PGA_DIR)/PipSoc.pnr --fasm $@, \
 		$(error nextpnr-xilinx not found. Run 'make vendor-f4pga' first))
 	@echo "[F4PGA] PnR done."
