@@ -91,8 +91,8 @@ class Soc(hexPath: String = "") extends Component {
   uart.io.rxPop := uartReadPending && uart.io.rxVld
 
   // ── Data RAM ──
-  private val ramRdData = dataRam.readAsync(dataWordAddr)
-  private val ramRspVld = core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr
+  private val ramRdData = dataRam.readSync(dataWordAddr)
+  private val ramRspVld = RegNext(core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr)
 
   dataRam.write(dataWordAddr, core.io.dataBus.req.wrData,
     core.io.dataBus.req.fire && !isIoAddr && core.io.dataBus.req.wr)
@@ -105,7 +105,7 @@ class Soc(hexPath: String = "") extends Component {
   // Formal Verification — covers the following test cases:
   //   TC-SOC-1:  instrRsp always valid
   //   TC-SOC-2:  Address decode boundary at 0x1FFC
-  //   TC-SOC-3:  Data RAM: read response same cycle as req.fire (async read)
+  //   TC-SOC-3:  Data RAM: read response 1 cycle after req.fire
   //   TC-SOC-4:  Data RAM: write on req.fire when addr<0x1FFC, wr=1
   //   TC-SOC-5:  UART write: txVld on req.fire when addr>=0x1FFC, wr=1
   //   TC-SOC-6:  UART read: uartReadPending on req.fire when addr>=0x1FFC, wr=0
@@ -151,9 +151,11 @@ class Soc(hexPath: String = "") extends Component {
 
     // ── Data RAM ──
 
-    /* TC-SOC-3: RAM read response same cycle as read request (async read) */
-    when(core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr) {
-      assert(ramRspVld)
+    /* TC-SOC-3: RAM read response valid 1 cycle after read request */
+    when(pastValid()) {
+      when(past(core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr)) {
+        assert(ramRspVld)
+      }
     }
 
     // ── UART I/O ──
