@@ -76,10 +76,11 @@ jobs:
           key: sbt-${{ hashFiles('build.sbt', 'project/build.properties', 'project/*.sbt') }}
           restore-keys: sbt-
 
-      - name: Install Verilator
+      - name: Install Verilator + Python deps
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq verilator
+          pip install -r requirements.txt
 
       - name: Run C tests on both cores
         run: make test-programs-all
