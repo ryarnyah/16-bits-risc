@@ -2,7 +2,7 @@ ThisBuild / version := "0.1.0-SNAPSHOT"
 ThisBuild / organization := "com.github.ryarnyah"
 ThisBuild / scalaVersion := "2.13.18"
 
-val spinalVersion = "1.14.2"
+val spinalVersion = "1.15.0"
 val scalaTestVersion = "3.2.20"
 val scalaTest = "org.scalatest" %% "scalatest" % scalaTestVersion % "test"
 val spinalCore = "com.github.spinalhdl" %% "spinalhdl-core" % spinalVersion
