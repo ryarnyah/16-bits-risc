@@ -71,8 +71,12 @@ class Soc(hexPath: String = "") extends Component {
   private val uartRspVld = RegInit(False)
   private val uartRdData = Reg(Bits(8 bits))
 
-  when(core.io.dataBus.req.fire && isIoAddr && !core.io.dataBus.req.wr) {
-    uartReadPending := True
+  // Response consumption BEFORE data capture — so when both happen in the
+  // same cycle (old response consumed + new UART data already available),
+  // the capture block's uartRspVld:=True overwrites the consume block's
+  // False, keeping the response valid for the new data.
+  when(core.io.dataBus.rsp.fire) {
+    uartRspVld := False
   }
   // If RX FIFO already has data, consume immediately (no extra cycle)
   when(uartReadPending && uart.io.rxVld) {
@@ -80,8 +84,8 @@ class Soc(hexPath: String = "") extends Component {
     uartRspVld := True
     uartReadPending := False
   }
-  when(core.io.dataBus.rsp.fire) {
-    uartRspVld := False
+  when(core.io.dataBus.req.fire && isIoAddr && !core.io.dataBus.req.wr) {
+    uartReadPending := True
   }
 
   uart.io.rxPop := uartReadPending && uart.io.rxVld
@@ -198,10 +202,10 @@ class Soc(hexPath: String = "") extends Component {
       assert(!uartReadPending)
     }
 
-    /* uartRspVld cleared when rsp.fire */
+    /* uartRspVld cleared when rsp.fire (unless new data arrived simultaneously) */
     when(pastValid()) {
       when(past(uartRspVld) && past(core.io.dataBus.rsp.fire)) {
-        assert(!uartRspVld)
+        assert(uartRspVld === (past(uartReadPending) && past(uart.io.rxVld)))
       }
     }
 

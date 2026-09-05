@@ -63,16 +63,20 @@ private val core = PipCore()
   private val uartRspVld = RegInit(False)
   private val uartRdData = Reg(Bits(8 bits))
 
-  when(core.io.dataBus.req.fire && isIoAddr && !core.io.dataBus.req.wr) {
-    uartReadPending := True
+  // Response consumption BEFORE data capture — so when both happen in the
+  // same cycle (old response consumed + new UART data already available),
+  // the capture block's uartRspVld:=True overwrites the consume block's
+  // False, keeping the response valid for the new data.
+  when(core.io.dataBus.rsp.fire) {
+    uartRspVld := False
   }
   when(uartReadPending && uart.io.rxVld) {
     uartRdData := uart.io.rxData
     uartRspVld := True
     uartReadPending := False
   }
-  when(core.io.dataBus.rsp.fire) {
-    uartRspVld := False
+  when(core.io.dataBus.req.fire && isIoAddr && !core.io.dataBus.req.wr) {
+    uartReadPending := True
   }
 
   uart.io.rxPop := uartReadPending && uart.io.rxVld
@@ -157,7 +161,8 @@ private val core = PipCore()
 
     when(pastValid()) {
       when(past(uartRspVld) && past(core.io.dataBus.rsp.fire)) {
-        assert(!uartRspVld)
+        // After consuming response: uartRspVld is False unless new data arrived simultaneously
+        assert(uartRspVld === (past(uartReadPending) && past(uart.io.rxVld)))
       }
     }
 
