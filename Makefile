@@ -3,7 +3,7 @@ EMU_DIR      := emulator
 BUILD_DIR    := $(EMU_DIR)/build
 TARGET_DIR   := target/gen
 
-EMULATOR      = $(BUILD_DIR)/obj_dir/emulator
+EMULATOR      = $(BUILD_DIR)/emulator
 EMULATOR_PIPSOC = $(BUILD_DIR)/obj_dir/pipsoc-emu
 HEX_DIR := examples
 
