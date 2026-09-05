@@ -123,24 +123,29 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val idSext = decoder.io.imm6.asSInt.resize(16).asBits
   // Forwarding for address computation: LD/ST use rs+imm6, but rs may be
   // updated by the instruction currently in EX (ALU/LDI) or WB/LD.
-  private val idFwdRsVal = Mux(rEX_type === InstrType.ALU && rEX_hasRd && rEX_rd === idRsAddr && rEX_rd =/= 0,
-    alu.io.result,
-    Mux(rEX_type === InstrType.LDI && rEX_hasRd && rEX_rd === idRsAddr && rEX_rd =/= 0,
-      rEX_ldiData,
-      Mux(ldRspPending && ldRd === idRsAddr && ldRd =/= 0,
-        ldData,
-        Mux(fwdFromWb && rWB_rd === idRsAddr,
-          rWB_result,
-          regFile.io.rsVal))))
-  private val idFwdRtVal = Mux(rEX_type === InstrType.ALU && rEX_hasRd && rEX_rd === idRtAddr && rEX_rd =/= 0,
-    alu.io.result,
-    Mux(rEX_type === InstrType.LDI && rEX_hasRd && rEX_rd === idRtAddr && rEX_rd =/= 0,
-      rEX_ldiData,
-      Mux(ldRspPending && ldRd === idRtAddr && ldRd =/= 0,
-        ldData,
-        Mux(fwdFromWb && rWB_rd === idRtAddr,
-          rWB_result,
-          regFile.io.rtVal))))
+  //
+  // Restructured from 4-level nested Mux to 2-level: EX result (ALU/LDI
+  // merged via inner mux) has highest priority, then LD, then WB, then
+  // regfile.  Pre-computing the common EX condition shortens the critical
+  // path by removing redundant comparisons from each nesting level.
+  private val exWritesRd = (rEX_type === InstrType.ALU || rEX_type === InstrType.LDI) &&
+    rEX_hasRd && rEX_rd =/= 0
+  private val idFwdRsExSel = exWritesRd && rEX_rd === idRsAddr
+  private val idFwdRtExSel = exWritesRd && rEX_rd === idRtAddr
+  private val idFwdExData = Mux(rEX_type === InstrType.ALU, alu.io.result, rEX_ldiData)
+  private val idFwdRsLdSel = ldRspPending && ldRd === idRsAddr && ldRd =/= 0
+  private val idFwdRtLdSel = ldRspPending && ldRd === idRtAddr && ldRd =/= 0
+  private val idFwdRsWbSel = fwdFromWb && rWB_rd === idRsAddr
+  private val idFwdRtWbSel = fwdFromWb && rWB_rd === idRtAddr
+
+  private val idFwdRsVal = Mux(idFwdRsExSel, idFwdExData,
+    Mux(idFwdRsLdSel, ldData,
+      Mux(idFwdRsWbSel, rWB_result,
+        regFile.io.rsVal)))
+  private val idFwdRtVal = Mux(idFwdRtExSel, idFwdExData,
+    Mux(idFwdRtLdSel, ldData,
+      Mux(idFwdRtWbSel, rWB_result,
+        regFile.io.rtVal)))
   private val idEffAddr = (idFwdRsVal.asSInt + idSext.asSInt).asBits.resized
   private val idBrShifted = idSext(14 downto 0) ## B"0"
   private val idBrTarget = (rID_pc.asSInt + 2 + idBrShifted.asSInt).asBits.resized

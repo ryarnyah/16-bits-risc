@@ -48,9 +48,9 @@ stall source.
 |---|-------------|--------|------------|--------|
 | 1 | Branch prediction (predict not-taken) | Branch penalty 2→1 cycle | Moderate | **Done** |
 | 2 | Async data RAM read | LD min 3→2 cycles, load-use stall eliminated | Low | **Done** |
-| 3 | Decoupled LD unit | Remove LD→use stall for independent instructions | High | Pending |
-| 4 | Deeper pipeline (formal WB stage) | Higher Fmax | Moderate | Pending |
-| 5 | Reduce forwarding mux depth | Higher Fmax | Low-Moderate | Pending |
+| 3 | Reduce forwarding mux depth | ID forwarding 4→2 levels, higher Fmax | Low | **Done** |
+| 4 | Decoupled LD unit | Remove LD→use stall for independent instructions | High | Cancelled (limited to UART reads only) |
+| 5 | Deeper pipeline (formal WB stage) | Higher Fmax | Moderate | Cancelled (adds 1 cycle latency to all instructions) |
 
 ## Verification
 
