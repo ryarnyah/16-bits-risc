@@ -206,10 +206,15 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val ldActiveStall = (ldRspPending || ldRespNow) && vID && decoder.io.isLD
   // Stall IF when a branch/JMP is in ID — prevents speculative fetch of
   // sequential instructions that would become stale if the branch is taken.
-  private val stallBrId = vID && (decoder.io.isBranch || decoder.io.isJMP)
+  // NOTE: Removed for predict-not-taken optimization.  IF now speculatively
+  // fetches the sequential instruction while branch is in ID.  If the branch
+  // is taken, exBrTaken flushes the speculative instruction and redirects PC.
+  // This reduces branch penalty from 2 cycles to 1 for taken branches,
+  // and eliminates the penalty entirely for not-taken branches.
+  //private val stallBrId = vID && (decoder.io.isBranch || decoder.io.isJMP)
   private val stallLdiId = vID && decoder.io.isLDI
   private val stallID = loadUseHazard || ldWaitStall || ldActiveStall
-  private val stallIF = stallID || stallBrId || stallLdiId
+  private val stallIF = stallID || stallLdiId
 
   // =========================================================================
   // Forwarding and Branch Detection

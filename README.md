@@ -35,11 +35,22 @@ stall source.
 | ST                                                 | 1   | —             | Write in EX; no writeback needed                                                         |
 | LD                                                 | 2   | `ldWaitStall` | +1 cycle for 1-cycle data bus response latency                                           |
 | LD (load-use)                                      | 2   | `ldWaitStall` | Same stall; data written to regfile in DATA_READY before next EX entry, no extra penalty |
-| BEQ/BNE/BLT                                        | 2   | `stallBrId`   | +1 cycle stall of IF while branch resolves in ID                                         |
-| JMP                                                | 2   | `stallBrId`   | Same as branch                                                                           |
+| BEQ/BNE/BLT (not taken)                            | 1   | —             | Predict not-taken: sequential fetch continues, 0 stall                                   |
+| BEQ/BNE/BLT (taken)                                | 2   | `exBrTaken`   | +1 cycle: speculative ID instruction flushed, PC redirected                              |
+| JMP                                                | 2   | `exBrTaken`   | +1 cycle: sequential fetch flushed, PC redirected to register target                     |
 | LDI (2-word)                                       | 3   | `stallLdiId`  | 2 IF cycles (opcode + immediate) + 1 cycle stall of IF while LDI is in ID                |
 
-**Estimated average CPI:** ~1.5
+**Estimated average CPI:** ~1.3
+
+## PipCore Speed Enhancements (TODO)
+
+| # | Enhancement | Impact | Complexity | Status |
+|---|-------------|--------|------------|--------|
+| 1 | Branch prediction (predict not-taken) | Branch penalty 2→1 cycle | Moderate | **In progress** |
+| 2 | Decoupled LD unit | Remove LD→use stall for independent instructions | High | Pending |
+| 3 | Async data RAM read | LD min 3→2 cycles | Low (Fmax trade-off) | Pending |
+| 4 | Deeper pipeline (formal WB stage) | Higher Fmax | Moderate | Pending |
+| 5 | Reduce forwarding mux depth | Higher Fmax | Low-Moderate | Pending |
 
 ## Verification
 
