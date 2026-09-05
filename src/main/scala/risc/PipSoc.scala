@@ -81,8 +81,8 @@ private val core = PipCore()
 
   uart.io.rxPop := uartReadPending && uart.io.rxVld
 
-  private val ramRdData = dataRam.readSync(dataWordAddr)
-  private val ramRspVld = RegNext(core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr)
+  private val ramRdData = dataRam.readAsync(dataWordAddr)
+  private val ramRspVld = core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr
 
   dataRam.write(dataWordAddr, core.io.dataBus.req.wrData,
     core.io.dataBus.req.fire && !isIoAddr && core.io.dataBus.req.wr)
@@ -116,10 +116,9 @@ private val core = PipCore()
 
     assert(isIoAddr === (core.io.dataBus.req.addr >= 0x1FFC))
 
-    when(pastValid()) {
-      when(past(core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr)) {
-        assert(ramRspVld)
-      }
+    // Async RAM: ramRspVld is combinational (same cycle as req.fire)
+    when(core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr) {
+      assert(ramRspVld)
     }
 
     when(core.io.dataBus.req.fire && isIoAddr && core.io.dataBus.req.wr) {

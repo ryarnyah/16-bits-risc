@@ -108,7 +108,11 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val ldWbVld = Reg(Bool()) init False // valid flag for LD writeback, decoupled from rEX_type
   private val ldPending = ldState === LdPhase.WAIT_BUS
   private val ldRspPending = ldState === LdPhase.DATA_READY
-  io.dataBus.rsp.ready := ldPending
+  // Accept response when waiting (WAIT_BUS) or when req fires and response
+  // arrives in the same cycle (async RAM read).  Without the second
+  // condition, the combinational response from async RAM would be lost
+  // because ldPending is only set one cycle after req fires.
+  io.dataBus.rsp.ready := ldPending || (rEX_type === InstrType.LD && ldState === LdPhase.IDLE && io.dataBus.req.fire)
 
   // Forwarding from WB stage (used by both ID address and EX ALU forwarding)
   private val fwdFromWb = vWB && rWB_hasRd && rWB_rd =/= 0
@@ -171,8 +175,15 @@ case class PipCore() extends Component with CoreBusIoComponent {
     is(LdPhase.IDLE) {
       when(rEX_type === InstrType.LD && io.dataBus.req.fire) {
         ldRd := rEX_rd
-        ldState := LdPhase.WAIT_BUS
         ldWbVld := True
+        when(io.dataBus.rsp.fire) {
+          // Async RAM: response available same cycle as request — skip WAIT_BUS
+          ldData := io.dataBus.rsp.payload
+          ldState := LdPhase.DATA_READY
+        } otherwise {
+          // Sync RAM or UART: wait for response in WAIT_BUS
+          ldState := LdPhase.WAIT_BUS
+        }
       }
     }
     is(LdPhase.WAIT_BUS) {
