@@ -55,7 +55,7 @@ emulator: $(TARGET_DIR)/Soc.sv
 		-Wno-DECLFILENAME -Wno-UNUSED -Wno-UNOPTFLAT \
 		-Wno-WIDTH -Wno-CASEINCOMPLETE -Wno-PINCONNECTEMPTY \
 		-Wno-UNDRIVEN \
-		-CFLAGS "-std=c++17 -O2" --top-module Soc \
+		-CFLAGS "-std=c++17 -O2 -DVL_TIME_CONTEXT" --top-module Soc \
 		$(abspath $(TARGET_DIR))/Soc.sv
 	$(MAKE) -C $(BUILD_DIR)/obj_dir -f VSoc.mk
 	$(CXX) -std=c++17 -O2 -I$(BUILD_DIR)/obj_dir -I$(VERILATOR_ROOT)/include \
