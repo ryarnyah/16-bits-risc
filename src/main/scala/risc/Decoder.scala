@@ -96,8 +96,11 @@ case class Decoder() extends Component {
    */
   private val opcU: UInt = opc.asUInt
   io.aluFunc := B"000"
-  when(opcU < 4) { io.aluFunc := (opcU >> 1).asBits.resized }
-  when(opcU >= 4) { io.aluFunc := (opcU - 2).asBits.resized }
+  when(opcU < 4) {
+    io.aluFunc := (opcU >> 1).asBits.resized
+  }.otherwise {
+    io.aluFunc := (opcU - 2).asBits.resized
+  }
 
   // ======================================================================
   // Formal Verification — covers the following test cases:

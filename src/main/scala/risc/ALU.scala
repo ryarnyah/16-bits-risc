@@ -1,6 +1,7 @@
 package risc
 
 import spinal.core._
+import spinal.lib.Reverse
 
 import scala.language.postfixOps
 
@@ -37,14 +38,36 @@ case class ALU() extends Component {
   val io: AluIo = AluIo()
 
   io.result := 0
+
+  // ---- 1. Shared adder for ADD (000) and SUB (010) ----
+  private val isSub = io.aluFunc === 2
+  private val opB_adj = isSub ? ((~io.opB).asUInt + 1) | io.opB.asUInt   // two's complement negation
+  private val arithResult = (io.rsVal.asUInt + opB_adj).asBits           // ADD when isSub=0, SUB when isSub=1
+
+  // ---- 2. Shared shifter for SLL (101) and SRL (110) ----
+  private val isSRL = io.aluFunc === 6
+  private val shiftAmt = io.opB(3 downto 0).asUInt       // 4-bit shift amount
+  // Reverse is pure wiring – zero LUTs
+  private val shiftInput = isSRL ? Reverse(io.rsVal) | io.rsVal
+  private val shifted = shiftInput |<< shiftAmt  // resized to original width
+  private val shiftResult = isSRL ? Reverse(shifted) | shifted
+
+  // ---- 3. Logic operations (XOR, AND, OR) ----
+  private val logicResult = Bits(io.result.getBitsWidth bits)
   switch(io.aluFunc) {
-    is(B"000") { io.result := (io.rsVal.asSInt + io.opB.asSInt).asBits }  // ADD (ISA §4.1)
-    is(B"001") { io.result := io.rsVal ^ io.opB }                          // XOR (ISA §4.7)
-    is(B"010") { io.result := (io.rsVal.asSInt - io.opB.asSInt).asBits }  // SUB (ISA §4.2)
-    is(B"011") { io.result := io.rsVal & io.opB }                          // AND (ISA §4.5)
-    is(B"100") { io.result := io.rsVal | io.opB }                          // OR  (ISA §4.6)
-    is(B"101") { io.result := io.rsVal |<< io.opB(3 downto 0).asUInt }     // SLL (ISA §4.3)
-    is(B"110") { io.result := io.rsVal |>> io.opB(3 downto 0).asUInt }     // SRL (ISA §4.4)
+    is(B"001") { logicResult := io.rsVal ^ io.opB }
+    is(B"011") { logicResult := io.rsVal & io.opB }
+    is(B"100") { logicResult := io.rsVal | io.opB }
+    default { logicResult := 0 }
+  }
+
+  // ---- 4. Final small multiplexer (only 4 groups) ----
+  switch(io.aluFunc) {
+    is(B"000") { io.result := arithResult }   // ADD
+    is(B"010") { io.result := arithResult }   // SUB
+    is(B"001", B"011", B"100") { io.result := logicResult } // XOR, AND, OR
+    is(B"101", B"110")    { io.result := shiftResult } // SLL, SRL
+    default     { io.result := 0 }
   }
 
   // ======================================================================

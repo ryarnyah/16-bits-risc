@@ -14,16 +14,16 @@ class SimPipCore extends Component {
   instrRom.simPublic()
   dataRam.simPublic()
 
-  val instrWordAddr = core.io.instrAddr(15 downto 1).resize(log2Up(4096))
+  private val instrWordAddr = core.io.instrAddr(15 downto 1).resize(log2Up(4096))
   core.io.instrRsp.valid := True
   core.io.instrRsp.payload := instrRom.readAsync(instrWordAddr)
 
-  val dataWordAddr = core.io.dataBus.req.addr(15 downto 1).resize(log2Up(4096))
+  private val dataWordAddr = core.io.dataBus.req.addr(15 downto 1).resize(log2Up(4096))
   core.io.dataBus.req.ready := True
   dataRam.write(dataWordAddr, core.io.dataBus.req.wrData,
     core.io.dataBus.req.fire && core.io.dataBus.req.wr)
-  val ramRdData = dataRam.readSync(dataWordAddr)
-  val ramRspVld = RegNext(core.io.dataBus.req.fire && !core.io.dataBus.req.wr, False)
+  private val ramRdData = dataRam.readSync(dataWordAddr)
+  private val ramRspVld = RegNext(core.io.dataBus.req.fire && !core.io.dataBus.req.wr, False)
   core.io.dataBus.rsp.valid := ramRspVld
   core.io.dataBus.rsp.payload := ramRdData
 
@@ -90,7 +90,7 @@ object PipCoreSim {
 
       val got = dut.dataRam.getBigInt(0)
       assert(got == expected,
-        f"$name: expected 0x${expected.toInt}%04X, got 0x${got.toInt}%04X")
+        f"$name: expected 0x$expected%04X, got 0x${got.toInt}%04X")
     }
   }
 
