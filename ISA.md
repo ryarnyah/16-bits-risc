@@ -100,7 +100,7 @@ The 6‑bit immediate is **sign‑extended** to 16 bits before the operation.
 - `BEQ Rs, Rt, off` : if `Rs == Rt` then `PC += sext(off)*2`
 - `BNE Rs, Rt, off` : if `Rs != Rt` then `PC += sext(off)*2`
 - `BLT Rs, Rt, off` : if `Rs < Rt` (signed) then `PC += sext(off)*2`
-- Offset is in **instructions** (not bytes), range ±32.
+- Offset is in **instructions** (not bytes), range –32 to +31.
 
 ---
 
