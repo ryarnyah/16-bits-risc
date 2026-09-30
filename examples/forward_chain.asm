@@ -33,20 +33,10 @@ main:
     XOR R1, R2, R1
     ST R1, [R6 -6]
     LD R1, [R6 -6]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R1, R0, #7
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    AND R1, R2, R1
+    ANDI R1, R1, #7
     ST R1, [R6 -8]
     LD R1, [R6 -8]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R1, R0, #1
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    OR R1, R2, R1
+    ORI R1, R1, #1
     ST R1, [R6 -10]
     LD R1, [R6 -10]
     ST R1, [R7]

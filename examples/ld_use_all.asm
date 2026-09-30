@@ -133,12 +133,7 @@ main:
     ST R1, [R7]
     ADDI R7, R7, #-2
     LD R1, [R6 -10]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R1, R0, #6
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    AND R1, R2, R1
+    ANDI R1, R1, #6
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
@@ -158,12 +153,7 @@ main:
     ST R1, [R7]
     ADDI R7, R7, #-2
     LD R1, [R6 -10]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R1, R0, #1
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    OR R1, R2, R1
+    ORI R1, R1, #1
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
