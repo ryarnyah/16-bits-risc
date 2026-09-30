@@ -857,6 +857,19 @@ class CGen:
                     self.emit('    ADDI R2, R0, #1')
                     self.emit('    AND R1, R1, R2')
                     return
+                # v2.1 Bank B immediates: ANDI, ORI, SLLI, SRLI, SRAI
+                if op == TOK_AND:
+                    self.emit(f'    ANDI R1, R1, #{s}')
+                    return
+                if op == TOK_PIPE:
+                    self.emit(f'    ORI R1, R1, #{s}')
+                    return
+                if op == TOK_LSH:
+                    self.emit(f'    SLLI R1, R1, #{s}')
+                    return
+                if op == TOK_RSH:
+                    self.emit(f'    SRAI R1, R1, #{s}')
+                    return
             # Load const into R2 for non-immediate ops
             self.emit('    ST R1, [R7]')
             self.emit('    ADDI R7, R7, #-2')
@@ -878,7 +891,7 @@ class CGen:
     def _emit_binop_op(self, op):
         alu = {TOK_PLUS: 'ADD', TOK_MINUS: 'SUB',
                TOK_AND: 'AND', TOK_PIPE: 'OR', TOK_CARET: 'XOR',
-               TOK_LSH: 'SLL', TOK_RSH: 'SRL'}
+               TOK_LSH: 'SLL', TOK_RSH: 'SRA'}  # v2.1: SRA for arithmetic right-shift
         if op in alu:
             self.emit(f'    {alu[op]} R1, R2, R1')
         elif op in (TOK_EQ, TOK_NE, TOK_LT, TOK_GT, TOK_LE, TOK_GE):
@@ -887,37 +900,54 @@ class CGen:
             self._gen_muldiv(op)
 
     def _gen_cmp(self, op):
-        t = self.L('ct')
-        e = self.L('ce')
-        self.emit('    XOR R1, R0, R0')  # default false
+        # v2.1 optimization: use SLT for <, >, <=, >= (1-3 words vs 3-4 words)
+        # R1 = right operand, R2 = left operand
+        # Result in R1: 1 if true, 0 if false
+        
         if op == TOK_EQ:
+            # x == y: XOR to get diff, branch on zero
             self.emit('    XOR R3, R2, R1')
-            self.emit(f'    BEQ R3, R0, {t}')
-        elif op == TOK_NE:
-            self.emit('    XOR R3, R2, R1')
-            self.emit(f'    BNE R3, R0, {t}')
-        elif op == TOK_LT:
-            self.emit(f'    BLT R2, R1, {t}')
-        elif op == TOK_GT:
-            self.emit(f'    BLT R1, R2, {t}')
-        elif op == TOK_LE:
-            self.emit(f'    BLT R1, R2, {t}')
-            self.emit(f'    JMP {e}')
-            self.emit_lbl(t)
-            self.emit('    ADDI R1, R0, #1')
+            e = self.L('ce')
+            self.emit('    XOR R1, R0, R0')  # default false
+            self.emit(f'    BNE R3, R0, {e}')  # if diff != 0, skip
+            self.emit('    ADDI R1, R0, #1')  # diff == 0, result = 1
             self.emit_lbl(e)
+            return
+
+        if op == TOK_NE:
+            # x != y: XOR to get diff, branch on nonzero
+            self.emit('    XOR R3, R2, R1')
+            e = self.L('ce')
+            self.emit('    XOR R1, R0, R0')  # default false
+            self.emit(f'    BEQ R3, R0, {e}')  # if diff == 0, skip
+            self.emit('    ADDI R1, R0, #1')  # diff != 0, result = 1
+            self.emit_lbl(e)
+            return
+
+        # v2.1 SLT-based comparisons (1-3 words each)
+        # SLT: set if left < right (signed)
+        
+        if op == TOK_LT:
+            # x < y: SLT R1, R2, R1 (true if R2 < R1)
+            self.emit('    SLT R1, R2, R1')
+            return
+        elif op == TOK_GT:
+            # x > y: SLT R1, R1, R2 (true if R1 < R2, i.e., y < x)
+            self.emit('    SLT R1, R1, R2')
+            return
+        elif op == TOK_LE:
+            # x <= y: NOT(x > y) = NOT(y < x) = NOT(SLT(R1, R2))
+            # Emit as: SLT R3, R1, R2; then negate (1 - R3)
+            self.emit('    SLT R3, R1, R2')
+            self.emit('    ADDI R1, R0, #1')
+            self.emit('    SUB R1, R1, R3')  # R1 = 1 - R3
             return
         elif op == TOK_GE:
-            self.emit(f'    BLT R2, R1, {t}')
-            self.emit(f'    JMP {e}')
-            self.emit_lbl(t)
+            # x >= y: NOT(x < y) = NOT(SLT(R2, R1))
+            self.emit('    SLT R3, R2, R1')
             self.emit('    ADDI R1, R0, #1')
-            self.emit_lbl(e)
+            self.emit('    SUB R1, R1, R3')  # R1 = 1 - R3
             return
-        self.emit(f'    JMP {e}')
-        self.emit_lbl(t)
-        self.emit('    ADDI R1, R0, #1')
-        self.emit_lbl(e)
 
     def _gen_muldiv(self, op):
         name = {TOK_STAR: 'mul16', TOK_SLASH: 'div16', TOK_PERCENT: 'mod16'}[op]
