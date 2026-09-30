@@ -72,29 +72,46 @@ case class Core() extends Component with CoreBusIoComponent {
   // === Decoder ===
   decoder.io.instr := instr
 
-  // === Sign extension ===
+  // === Sign/zero extension (ISA v2.1 §4.5) ===
   private val sextVal = decoder.io.imm6.asSInt.resize(16).asBits
+  private val zextVal = B(0, 10 bits) ## decoder.io.imm6   // group-B immediates
+
+  // === v2.1: byte-memory class (LDB/STB) ===
+  private val isByteMem = decoder.io.isLDB || decoder.io.isSTB
+  private val isLoad = decoder.io.isLD || decoder.io.isLDB
 
   // === ALU ===
+  // Operand B: sign-extended imm (ADDI/XORI), zero-extended imm (group-B
+  // immediates), or the Rt register value.
   alu.io.rsVal := regFile.io.rsVal
-  alu.io.opB := decoder.io.isImmEn ? sextVal | regFile.io.rtVal
+  alu.io.opB := decoder.io.isImmEn ? sextVal |
+    (decoder.io.immZext ? zextVal | regFile.io.rtVal)
   alu.io.aluFunc := decoder.io.aluFunc
 
   // === Load/store effective address ===
-  // ISA §3.3: Effective address = Rs + sext(off), word-aligned
-  // Data accesses go through the stream-based data bus to SoC.
-  private val effAddr = (regFile.io.rsVal.asSInt + sextVal.asSInt).asBits.resized
+  // ISA §3.3 / v2.1 §4.3: word access = Rs + sext(off6); byte access
+  // (LDB/STB, v2.1 §4.6) = Rs + zext(off3).  Bit 0 of a word address is
+  // ignored by the SoC (deterministic aliasing, v2.1 §2.3).
+  private val offZext3 = B(0, 13 bits) ## decoder.io.instr(2 downto 0)
+  private val effAddr = Mux(isByteMem,
+    (regFile.io.rsVal.asUInt + offZext3.asUInt).asBits,
+    (regFile.io.rsVal.asSInt + sextVal.asSInt).asBits.resized)
 
   // === Register file ===
   // Branch (BEQ/BNE/BLT):   Rs in instr[11:9], Rt in instr[8:6]   (ISA §3.4)
   // JMP:                    Rs in instr[11:9]                       (ISA §3.5)
-  // ST:                     store source in rdField instr[11:9]     (ISA §3.3)
+  // ST/STB:                 store source in rdField instr[11:9]     (ISA §3.3)
+  // Group-B immediates:     Rd read in place from instr[11:9]       (v2.1 §4.5)
+  // LDB/STB:                base Rs in instr[5:3]                   (v2.1 §4.6)
   // All others:             Rs in instr[8:6],  Rt in instr[5:3]
-  private val rsAddr = ((decoder.io.isBranch || decoder.io.isJMP) ?
-    decoder.io.instr(11 downto 9).asBits | decoder.io.rsReg.asBits).asUInt
-  private val rtAddr = (decoder.io.isST ?
+  private val rsAddr = ((decoder.io.isBranch || decoder.io.isJMP ||
+    decoder.io.isGrpBImm) ? decoder.io.instr(11 downto 9).asBits |
+    (isByteMem ? decoder.io.instr(5 downto 3).asBits |
+      decoder.io.rsReg.asBits)).asUInt
+  private val rtAddr = ((decoder.io.isST || decoder.io.isSTB) ?
     decoder.io.rdField.asBits |
-    (decoder.io.isBranch ? decoder.io.instr(8 downto 6).asBits | decoder.io.rtReg.asBits)).asUInt
+    (decoder.io.isBranch ? decoder.io.instr(8 downto 6).asBits |
+      decoder.io.rtReg.asBits)).asUInt
 
   regFile.io.rsAddr := rsAddr
   regFile.io.rtAddr := rtAddr
@@ -102,12 +119,16 @@ case class Core() extends Component with CoreBusIoComponent {
   // LD hazard: aluRes is updated at the same posedge as the register file write,
   // so the regfile would get the stale aluRes value. Use rsp.payload directly
   // when LD completes (rsp.fire), bypassing the register pipeline delay.
-  regFile.io.wrData := Mux(decoder.io.isLD && io.dataBus.rsp.fire,
-    io.dataBus.rsp.payload, aluRes)
-  // LD: wrEn only asserted when rsp.fire (no unnecessary writes during stall)
+  // v2.1 §5.6: LDB zero-extends the addressed byte lane (selected by addr[0],
+  // little-endian §2.2); LD passes the full word through.
+  private val loadWord = io.dataBus.rsp.payload
+  private val loadByte = Mux(effAddr(0), loadWord(15 downto 8), loadWord(7 downto 0))
+  private val loadVal = decoder.io.isLDB ? (B(0, 8 bits) ## loadByte) | loadWord
+  regFile.io.wrData := Mux(isLoad && io.dataBus.rsp.fire, loadVal, aluRes)
+  // LD/LDB: wrEn only asserted when rsp.fire (no unnecessary writes during stall)
   // All other instrs: wrEn asserted in WRITEBACK (aluRes already computed)
   regFile.io.wrEn := (rd =/= 0) && (state === CoreState.WRITEBACK) &&
-    (!decoder.io.isLD || io.dataBus.rsp.fire)
+    (!isLoad || io.dataBus.rsp.fire)
   regFile.io.auxAddr := Mux(
     busIf.io.cmdStrb && busIf.io.cmdWord(31 downto 24) === 0x06,
     busIf.io.cmdWord(18 downto 16).asUInt,
@@ -127,6 +148,11 @@ case class Core() extends Component with CoreBusIoComponent {
 
   // === ST data (from rdField via rtAddr override) ===
   private val stVal = regFile.io.rtVal
+  // v2.1 §5.6: STB writes R[Rd][7:0] into the addressed byte lane
+  // (little-endian: odd address → upper lane).  The SoC masks the other lane.
+  private val stData = Mux(effAddr(0),
+    (stVal(7 downto 0) ## B(0, 8 bits)),
+    (B(0, 8 bits) ## stVal(7 downto 0)))
 
   // === Bus command processing ===
   // Commands: 0x03=RESET, 0x04=STEP, 0x05=RUN, 0x06=READ_REG, 0x08=READ_PC
@@ -155,6 +181,7 @@ case class Core() extends Component with CoreBusIoComponent {
   io.dataBus.req.payload.wrData := stVal
   io.dataBus.req.valid := False
   io.dataBus.req.payload.wr := False
+  io.dataBus.req.payload.isByte := False
   io.dataBus.rsp.ready := False
 
   // === Instruction bus default (not ready outside FETCH/LDI_FETCH) ===
@@ -181,25 +208,44 @@ case class Core() extends Component with CoreBusIoComponent {
     }
     is(CoreState.DECODE) {
       rd := (decoder.io.hasRd ? decoder.io.rdField | B"000").asUInt
+      // v2.1 §2.6: reserved encodings execute as NOP — no state effect,
+      // PC already advanced past the word at FETCH.
+      when(decoder.io.isReserved) { done() }
       when(decoder.io.isALU) { aluRes := alu.io.result; state := CoreState.WRITEBACK }
-      when(decoder.io.isLD) {
+      // v2.1 §5.6: LDI8 — 1-word constant load, skips LDI_FETCH (PC += 2).
+      when(decoder.io.isLDI8) {
+        aluRes := B(0, 8 bits) ## decoder.io.instr(7 downto 0)
+        state := CoreState.WRITEBACK
+      }
+      when(decoder.io.isLD || decoder.io.isLDB) {
         io.dataBus.req.valid := True
         io.dataBus.req.payload.addr := effAddr.asUInt
         io.dataBus.req.payload.wr := False
+        io.dataBus.req.payload.isByte := decoder.io.isLDB
         when(io.dataBus.req.fire) { state := CoreState.WRITEBACK }
       }
-      when(decoder.io.isST) {
+      when(decoder.io.isST || decoder.io.isSTB) {
         io.dataBus.req.valid := True
         io.dataBus.req.payload.addr := effAddr.asUInt
-        io.dataBus.req.payload.wrData := stVal
+        io.dataBus.req.payload.wrData := decoder.io.isSTB ? stData | stVal
         io.dataBus.req.payload.wr := True
+        io.dataBus.req.payload.isByte := decoder.io.isSTB
         when(io.dataBus.req.fire) { done() }
       }
       when(decoder.io.isJMP) { PC := regFile.io.rsVal.asUInt; done() }
+      // v2.1 §5.4: CALL Rlink,Rtarget — Rlink ← PC (already incremented past
+      // the CALL at FETCH), then jump to Rtarget (Rt field instr[5:3]).
+      when(decoder.io.isCALL) {
+        aluRes := PC.asBits
+        PC := regFile.io.rtVal.asUInt
+        state := CoreState.WRITEBACK
+      }
       when(decoder.io.isBranch) {
         when(brTaken) { PC := brTarget.asUInt }
         done()
       }
+      // v2.1 §5.4: HALT — terminal state until reset/bus command.
+      when(decoder.io.isHALT) { state := CoreState.HALT }
       when(decoder.io.isLDI) { state := CoreState.LDI_FETCH }
     }
     is(CoreState.LDI_FETCH) {
@@ -211,16 +257,19 @@ case class Core() extends Component with CoreBusIoComponent {
       }
     }
     is(CoreState.WRITEBACK) {
-      when(decoder.io.isLD) {
+      when(isLoad) {
         io.dataBus.rsp.ready := True
         when(io.dataBus.rsp.fire) {
-          aluRes := io.dataBus.rsp.payload
+          aluRes := loadVal
           done()
         }
       } otherwise {
         done()
       }
     }
+    // v2.1 §5.4: HALT — freeze until reset/bus command (cmd 0x03/0x04/0x05
+    // are handled above the switch and can leave this state).
+    is(CoreState.HALT) {}
     default {}
   }
 
@@ -316,6 +365,70 @@ case class Core() extends Component with CoreBusIoComponent {
         }
         when(!busChangesPC && resetn)    { assert(PC === past(PC)) }
       }
+
+      // TC-CORE-7 (v2.1): ALU-class (incl. group-B immediates) and LDI8
+      // unconditionally move DECODE → WRITEBACK without touching the PC.
+      when((past(decoder.io.isALU) || past(decoder.io.isLDI8)) &&
+        past(state) === CoreState.DECODE) {
+        when(!busChangesState && resetn) { assert(state === CoreState.WRITEBACK) }
+        when(!busChangesPC && resetn)    { assert(PC === past(PC)) }
+      }
+
+      // TC-CORE-8 (v2.1): LD/LDB/ST/STB only leave DECODE on a bus handshake,
+      // and never modify the PC there.  (instr is held from FETCH, so the
+      // current decode still describes the instruction that was in DECODE.)
+      when(past(state) === CoreState.DECODE &&
+        (past(decoder.io.isLD) || past(decoder.io.isLDB) ||
+         past(decoder.io.isST) || past(decoder.io.isSTB)) &&
+        past(io.dataBus.req.fire)) {
+        when(!busChangesPC && resetn) { assert(PC === past(PC)) }
+        when((decoder.io.isLD || decoder.io.isLDB) && !busChangesState && resetn) {
+          assert(state === CoreState.WRITEBACK)
+        }
+        when((decoder.io.isST || decoder.io.isSTB) && !busChangesState && resetn) {
+          assert(state === CoreState.IDLE || state === CoreState.FETCH)
+        }
+      }
+
+      // TC-CORE-9 (v2.1): CALL — link register receives the PC that was current
+      // at DECODE (address after the 1-word CALL), PC ← R[Rt] (target).
+      when(resetn && past(state) === CoreState.DECODE && past(decoder.io.isCALL)) {
+        when(!busChangesState) { assert(state === CoreState.WRITEBACK) }
+        when(!busChangesPC) {
+          assert(regFile.io.wrData === past(PC).asBits)
+          assert(PC === past(regFile.io.rtVal).asUInt)
+        }
+      }
+
+      // TC-CORE-10 (v2.1): HALT is terminal — state and PC freeze until a
+      // bus command (§5.4: only reset/bus reset exits HALT on this SoC).
+      when(past(state) === CoreState.HALT) {
+        when(!busChangesState && resetn) { assert(state === CoreState.HALT) }
+        when(!busChangesPC && resetn)    { assert(PC === past(PC)) }
+      }
+
+      // TC-CORE-11 (v2.1): reserved encodings are NOP — DECODE → IDLE/FETCH,
+      // no PC change, no register write (§2.6).
+      when(past(state) === CoreState.DECODE && past(decoder.io.isReserved)) {
+        when(!busChangesState && resetn) {
+          assert(state === CoreState.IDLE || state === CoreState.FETCH)
+        }
+        when(!busChangesPC && resetn) { assert(PC === past(PC)) }
+        assert(!regFile.io.wrEn || rd === 0)
+      }
+    }
+
+    // ── v2.1 byte-load lane select (LDB, §5.6) ──
+    when(state === CoreState.WRITEBACK && decoder.io.isLDB && io.dataBus.rsp.fire) {
+      val expByte = Mux(effAddr(0),
+        io.dataBus.rsp.payload(15 downto 8), io.dataBus.rsp.payload(7 downto 0))
+      assert(regFile.io.wrData === (B(0, 8 bits) ## expByte))
+      assert(regFile.io.wrEn || rd === 0)
+    }
+
+    // ── v2.1: LDI8 writes the zero-extended immediate (§5.6) ──
+    when(state === CoreState.WRITEBACK && decoder.io.isLDI8) {
+      assert(aluRes === (B(0, 8 bits) ## decoder.io.instr(7 downto 0)))
     }
 
     // ── Data write path assertions ──
@@ -346,6 +459,13 @@ case class Core() extends Component with CoreBusIoComponent {
     cover(state === CoreState.DECODE)
     cover(state === CoreState.WRITEBACK)
     cover(state === CoreState.LDI_FETCH)
+    cover(state === CoreState.HALT)
+    cover(decoder.io.isCALL)
+    cover(decoder.io.isLDI8)
+    cover(decoder.io.isLDB)
+    cover(decoder.io.isSTB)
+    cover(decoder.io.isGrpBImm)
+    cover(decoder.io.isReserved)
     cover(io.bus.ack)
     cover(io.bus.rsp.valid)
   }

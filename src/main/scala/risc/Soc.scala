@@ -94,8 +94,13 @@ class Soc(hexPath: String = "") extends Component {
   private val ramRdData = dataRam.readSync(dataWordAddr)
   private val ramRspVld = RegNext(core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr)
 
+  // v2.1 §4.6: byte writes (STB) mask exactly one 8-bit lane — little-endian,
+  // lane selected by addr[0].  Word writes (ST) keep the full 2-bit mask.
+  private val ramWrMask = core.io.dataBus.req.payload.isByte ?
+    Mux(core.io.dataBus.req.addr(0), B"10", B"01") | B"11"
   dataRam.write(dataWordAddr, core.io.dataBus.req.wrData,
-    core.io.dataBus.req.fire && !isIoAddr && core.io.dataBus.req.wr)
+    core.io.dataBus.req.fire && !isIoAddr && core.io.dataBus.req.wr,
+    mask = ramWrMask)
 
   // ── Data bus response ──
   core.io.dataBus.rsp.valid := ramRspVld || uartRspVld
@@ -178,6 +183,17 @@ class Soc(hexPath: String = "") extends Component {
     }
     when(isIoAddr && !core.io.dataBus.req.wr) {
       assert(core.io.dataBus.req.ready)
+    }
+
+    /* TC-SOC-11 (v2.1 §4.6): byte writes mask exactly one 8-bit lane,
+     * selected by addr[0] (little-endian); word writes mask both lanes. */
+    when(core.io.dataBus.req.fire && !isIoAddr && core.io.dataBus.req.wr) {
+      when(core.io.dataBus.req.payload.isByte) {
+        assert(ramWrMask === Mux(core.io.dataBus.req.addr(0), B"10", B"01"))
+        assert(ramWrMask =/= B"11")
+      } otherwise {
+        assert(ramWrMask === B"11")
+      }
     }
 
     // ── UART read state machine ──

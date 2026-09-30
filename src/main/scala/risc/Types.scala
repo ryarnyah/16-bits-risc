@@ -6,7 +6,7 @@ import spinal.lib._
 import scala.language.postfixOps
 
 object CoreState extends SpinalEnum {
-  val IDLE, FETCH, DECODE, LDI_FETCH, WRITEBACK = newElement()
+  val IDLE, FETCH, DECODE, LDI_FETCH, WRITEBACK, HALT = newElement()
 }
 
 case class CoreConfig()
@@ -31,6 +31,9 @@ case class DataBusReq() extends Bundle {
   val addr: UInt = UInt(16 bits)
   val wrData: Bits = Bits(16 bits)
   val wr: Bool = Bool()
+  /** ISA v2.1 §4.6: byte access (LDB/STB) — masks a single byte lane on
+    * writes; reads return the full word (the core selects the lane by addr[0]). */
+  val isByte: Bool = Bool()
 }
 
 case class DataBusIo() extends Bundle with IMasterSlave {

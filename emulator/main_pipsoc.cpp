@@ -341,7 +341,9 @@ public:
 
 u16 readDataMem(u16 addr) {
     u16 wordAddr = (addr >> 1) & 0xFFF;
-    return soc->rootp->PipSoc__DOT__dataRam[wordAddr];
+    // v2.1: byte-write-masked RAM is emitted as two 8-bit lane arrays
+    return soc->rootp->PipSoc__DOT__dataRam_symbol0[wordAddr] |
+           (u16)(soc->rootp->PipSoc__DOT__dataRam_symbol1[wordAddr] << 8);
 }
 };
 

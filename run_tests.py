@@ -49,6 +49,17 @@ TESTS = [
     ('call_deep.c',    0x15,  20000),  #  21
 ]
 
+# v2.1 ISA-level assembly tests (new instructions / pseudo-ops / LDI8)
+ASM_TESTS = [
+    ('slt_test.asm',       0x03,   2000),   # SLT/SLTU signed vs unsigned
+    ('sra_test.asm',       0xC001, 2000),   # SRA/SRL/SRAI arithmetic shift
+    ('imm_test.asm',       0x3E,   2000),   # ANDI/ORI/SLLI/SRLI/SRAI in-place
+    ('call_test.asm',      0x2A,   2000),   # CALL/RET link + return
+    ('byte_test.asm',      0x112,  4000),   # STB/LDB lanes + zero-extend
+    ('ldi8_rsvd_test.asm', 0x1FF,  2000),   # LDI auto-narrow, reserved=NOP, HALT
+    ('bge_test.asm',       0x01,   2000),   # BGE pseudo branches on equality
+]
+
 def compile_c(c_file):
     base = os.path.splitext(c_file)[0]
     hex_file = base + '.hex'
@@ -58,6 +69,18 @@ def compile_c(c_file):
         capture_output=True, text=True)
     if r.returncode != 0:
         print(f'COMPILE FAIL\n{r.stderr}')
+        return False
+    return True
+
+def compile_asm(asm_file):
+    base = os.path.splitext(asm_file)[0]
+    hex_file = base + '.hex'
+    asm_path = os.path.join('examples', asm_file)
+    hex_path = os.path.join('examples', hex_file)
+    r = subprocess.run([sys.executable, 'asm.py', asm_path, '-o', hex_path],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f'ASSEMBLE FAIL\n{r.stderr}')
         return False
     return True
 
@@ -90,27 +113,28 @@ def main():
 
     failures = 0
     passed = 0
-    for entry in TESTS:
-        c_file, expected, steps = entry
-        base = os.path.splitext(c_file)[0]
-        hex_file = base + '.hex'
-        print(f'  {c_file:20s} ...', end=' ')
-        sys.stdout.flush()
-        if not compile_c(c_file):
-            print('COMPILE FAIL')
-            failures += 1
-            continue
-        result = run_hex(emulator, hex_file, steps)
-        if result is None:
-            print('RUN FAIL')
-            failures += 1
-            continue
-        if result == expected:
-            print(f'OK (0x{result:X})')
-            passed += 1
-        else:
-            print(f'FAIL: got 0x{result:X}, expected 0x{expected:X}')
-            failures += 1
+    for entries, compile_fn in ((TESTS, compile_c), (ASM_TESTS, compile_asm)):
+        for entry in entries:
+            src_file, expected, steps = entry
+            base = os.path.splitext(src_file)[0]
+            hex_file = base + '.hex'
+            print(f'  {src_file:20s} ...', end=' ')
+            sys.stdout.flush()
+            if not compile_fn(src_file):
+                print('COMPILE FAIL')
+                failures += 1
+                continue
+            result = run_hex(emulator, hex_file, steps)
+            if result is None:
+                print('RUN FAIL')
+                failures += 1
+                continue
+            if result == expected:
+                print(f'OK (0x{result:X})')
+                passed += 1
+            else:
+                print(f'FAIL: got 0x{result:X}, expected 0x{expected:X}')
+                failures += 1
     print()
     if failures:
         print(f'{failures} test(s) FAILED, {passed} passed')

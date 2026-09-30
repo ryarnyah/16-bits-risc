@@ -146,25 +146,62 @@
     - Verified: all 41 C tests pass on both emulators, bench_15.c (15-element
       array, offset -34 for sum) correctly returns 0x69.
 
+17. **ISA v2.1 implemented** (spec: `ISA-2.1.md`; RTL + assembler + tests):
+    - RTL: `Decoder` banks A/B/F (SLT/SLTU/SRA via funct3, group-B immediates
+      ANDI/ORI/SLLI/SRLI/SRAI cf≥011, CALL cf=001, HALT cf=010, LDI8/LDB/STB),
+      4-bit `aluFunc`, `CoreState.HALT`, PipCore `InstrType.CALL` + `halted`
+      register, `DataBusReq.isByte`, byte-lane RAM write mask in Soc/PipSoc
+      (`Mem.write(..., mask)` granularity 8 → memory emitted as
+      `dataRam_symbol0/1`).
+    - `asm.py`: encoders for all 13 new instructions, `LDI`/`JMP label`
+      auto-narrowing to `LDI8` (joint layout fixpoint over relaxation +
+      narrowing + labels, widest-layout fallback), pseudo-ops per §7.2
+      (MOV NEG NOT CLR LSL LSR ASR B BGT BGE BLE BLTU BGEU BLEU RET,
+      3-op `ANDI Rd,Rs,#imm` expansion, `.scratch Rn`).
+    - `run_tests.py`: 7 new ISA-level asm tests (`ASM_TESTS`) → 48 total.
+
+18. **PipCore formal frame-0 state gap**: new state-consistency assert
+    (`ldRspPending && ldIsByte → ldData[15:8]==0`) failed BMC at step 1 —
+    clk2fflogic does not apply `init` attributes to the frame-0 state and
+    `ldState/ldIsByte/ldAddr0/ldWbVld` were missing from the `assumeInitial`
+    list (pre-existing LD asserts were transition properties, self-consistent
+    under any frame-0 state). Fix: `assumeInitial` the LD FSM regs.
+
+19. **PipCore adjacent-load loss — `ldIssueStall`**: a load in EX whose
+    `req.fire` had not been captured yet could be replaced by the next ID→EX
+    transfer: with a same-cycle bus response `ldRspPending` is still 0 during
+    the issue cycle, so neither `ldActiveStall` (checks `ldRspPending`) nor
+    `loadUseHazard` (requires `!ldRspPending`) stalls ID — the load's request
+    was never issued and its destination never written. Caught by
+    `byte_test.asm` (back-to-back `LDB`). Fix: `ldIssueStall =
+    rEX_type===LD && ldState===IDLE` added to `stallID` (holds EX until the
+    LD FSM owns the access; mirrors `stStall` for stores).
+
+20. **PipSoc emulator lane-split RAM read**: byte write mask makes
+    SpinalHDL emit `dataRam_symbol0`/`dataRam_symbol1` (2×8-bit lanes);
+    `main_pipsoc.cpp` `readDataMem` reads both lanes.
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully
 - **Formal Verification**: ✓ All 5 components pass at BMC(30): Core, ALU, Decoder, RegFile, BusInterface
-- **PipCore Formal Verification**: ✓ PipCore passes BMC(30)
+- **PipCore Formal Verification**: ✓ PipCore passes BMC(30) (incl. v2.1 CALL/HALT/LDI8/LDB/STB/GrpBImm asserts)
+- **SoC Formal**: ✓ Soc + PipSoc pass BMC(10) incl. byte write-mask TC
+- **Full suite**: ✓ `sbt test` — 34/34 tests pass
 - **Verilator Emulator**: ✓ Compiles and runs, responds to bus commands (LOAD_ADDR, LOAD_DATA, STEP, RUN, READ_REG, READ_MEM, READ_PC)
 - **End-to-end counter program**: ✓ counter.asm loads, loops, counts R3 1..9, BLT branch, resets to 0
 - **C99 Compiler (cc.py)**: ✓ Compiles C programs to RISC assembly, with peephole optimizer and runtime lib (mul/div/mod)
   - Fixed local array base address: uses `ADDI R1, R6, #off` instead of loading from uninitialized stack slot
   - Fixed stack allocation: correctly accounts for `array_size * 2` bytes
   - Fixed for-loop body parsing: `)` token sets `phase = 3` so body is not silently dropped
-- **Assembler (asm.py)**: ✓ `JMP label` pseudo-op emits `LDI R4,#label; JMP R4` (3 words) to avoid ±32-word branch limit
+- **Assembler (asm.py)**: ✓ `JMP label` pseudo-op emits `LDI R4,#label; JMP R4` (3 words) to avoid ±32-word branch limit; v2.1: auto-narrows `LDI`/`JMP label` to `LDI8` when the target resolves to 0..255
 - **UART program (fib_uart.c)**: ✓ Compiles via cc.py, runs via `make test-fib-uart` with piped input
 
 ### PipCore Verification
 
 - **PipSoc Emulator**: ✓ Compiles and runs (pipsoc-emu), separate emulator using PipSoc Verilog
 - **PipCore Formal Verification**: ✓ PipCore passes BMC(30)
-- **C compiled tests on both cores**: **41/41 pass** (all tests pass on both PipSoc and multi-cycle core)
+- **C + asm tests on both cores**: **48/48 pass** (41 C tests + 7 v2.1 ISA asm tests, on both PipSoc and multi-cycle core)
   - Pipeline patterns: `ld_use_all` (LD→ADD/SUB/AND/OR), `ld_st_addr` (LDI address for ST),
     `forward_chain` (6-op ALU forwarding), `ldi_burst` (back-to-back LDI),
     `br_chain` (BEQ/BNE/BLT), `ld_ld_ld` (3 LDs), `st_ld_test` (ST→LD aliasing)
@@ -193,7 +230,16 @@
 | 0xE | BLT | `fib.c`, `all_alu_test.c`, `collatz.c` |
 | 0xF | LDI | everywhere (load addresses, constants) |
 
-- **SRA** (arithmetic right shift): NOT implemented — no aluFunc encoding, no assembler mnemonic, no decoder entry. 16 opcode slots are all filled.
+v2.1 additions (encoded in padding/`must-be-zero` fields, reserved encodings
+still NOP — see `ISA-2.1.md` §11):
+
+| Mnemonic | Encoding home | Test |
+|----------|---------------|------|
+| SLT / SLTU / SRA | op 4/8 + funct3 001/010 | `slt_test.asm`, `sra_test.asm` |
+| ANDI/ORI/SLLI/SRLI/SRAI | group B (JMP), cf≥011, in-place | `imm_test.asm` |
+| CALL / HALT | group B, cf=001 / 010 | `call_test.asm`, `ldi8_rsvd_test.asm` |
+| LDI8 / LDB / STB | group F (LDI), b8 / mf=01/10 | `byte_test.asm`, `ldi8_rsvd_test.asm` |
+| BGE/BLE/BLTU/BGEU/BLEU/B/BGT/MOV/… | assembler pseudo-ops (§7.2) | `bge_test.asm` |
 
 ### FPGA Flow (F4PGA for Basys3 / xc7a35tcpg236-1)
 
