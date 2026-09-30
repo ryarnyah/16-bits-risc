@@ -193,10 +193,10 @@ op = 0x4 : f3 = 001 → SLT      op = 0x8 : f3 = 001 → SRA
            f3 = 010 → SLTU                 other f3 → NOP
 
 op = 0xB : cf = inst[8:6]
-           000 + payload=0      → JMP Rs
-           001 + payload=Rtgt||000 → CALL Rlink,Rtgt
-           010 + A=000+payload=0→ HALT
-           011..111             → ANDI/ORI/SLLI/SRLI/SRAI  (Rd = inst[11:9])
+           000 + A=Rs + payload=0                  → JMP Rs
+           001 + A=Rlink + payload=Rtarget||000   → CALL Rlink, Rtarget
+           010 + A=000 + payload=0                → HALT
+           011..111                               → ANDI/ORI/SLLI/SRLI/SRAI (Rd = inst[11:9])
 
 op = 0xF : b8 = inst[8], mf = inst[7:6]
            b8=1                 → LDI8 Rd, #imm8
@@ -482,7 +482,7 @@ Temporaries default to `R4`, overridable with a `.scratch Rn` directive.
 | `BGEU Rs, Rt, L` | `SLTU tmp,Rs,Rt` + `BEQ tmp,R0,L` | 2 |
 | `BLEU Rs, Rt, L` | `SLTU tmp,Rt,Rs` + `BEQ tmp,R0,L` | 2 |
 | `RET Rlink` | `JMP Rlink` | 1 |
-| `JMP label` | `LDI Rt,#label` + `JMP Rt` (existing; shrinks to 2 words if label < 256) | 2–3 |
+| `JMP label` | `LDI R4,#label` + `JMP R4` (existing; shrinks to 2 words if label < 256) | 2–3 |
 
 `BGE`/`BLE` may alternatively expand without a scratch register as
 `BLT Rs,Rt,skip; B label; skip:` (also 2 words) — assembler option.
