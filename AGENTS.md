@@ -22,8 +22,8 @@
 - **Execution order (PLAN.md):** ISA v3 breaking changes → maintainability → speed
 - **ISA v3.2 (unified BR Z/NZ/MI/PL, ±64w):** DONE — 49/49, `sbt test`
   35/35, exact-inverse far form (3 sites: collatz/bench_alu)
-- **ISA v3.3 (CALLR/JMPR, LDIH proven impossible):** DONE — 50/50 both
-  emus, `sbt test` 35/35, zero stale LDI+JMP in fresh output
+- **Phase 1 (ISA v3) CLOSED:** V3.1 word-LD/ST, V3.2 BR, V3.3 CALLR/JMPR;
+  V3.4 WONTFIX, V3.5 deferred, LDIH impossible. F4PGA: 106.19 MHz PASS.
 
 - **Package:** `risc`
 - **Bus:** 8-bit Stream cmd/rsp + ack, per INSTRUCTIONS.md

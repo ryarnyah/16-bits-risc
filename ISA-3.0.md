@@ -67,6 +67,7 @@ byte-granular high half cannot be encoded, and 3+-word syntheses lose to
 - Assembler: `CALLR Rlink, label` (far → `LDI R4,#label ; CALL Rlink,R4`),
   `JMPR label` (far → `JMP label`), via the shared relaxation fixpoint.
 
-## V3.4 Clean ALU opcode map — PROPOSED
+## V3.4 Clean ALU opcode map — CLOSED AS WONTFIX (see `PLAN.md`)
 
-## V3.5 Byte-offset widening — PROPOSED (only if profiling justifies)
+## V3.5 Byte-offset widening — DEFERRED (no demander: `cc.py` emits no
+byte ops; revisit with profiler evidence only)

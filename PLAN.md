@@ -95,22 +95,27 @@ plus the jump (1 word); runtime calls cost 5 words. Both new ops fit
 - Gate: 50/50 both emus ✓, `sbt test` 35/35 ✓ (BMC30 incl. new
   CALLR/JMPR asserts), zero `LDI+JMP` sequences in fresh output ✓.
 
-### V3.4 Clean ALU opcode map (do last — touches every instruction)
-Why: `aluFunc = opc<4 ? opc>>1 : opc-2` (`Decoder.scala:184-185`) is a
-historical artifact; renumber ALU ops 0–7 so `aluFunc = op[2:0]`,
-single-bit imm select. Only after V3.2 frees opcodes.
-- Files: `Decoder.scala`, `ALU.scala` (unchanged codes, new derivation),
-  `asm.py` OPCODES, `cc.py` emitters, every example recompiled.
-- Gate: full suite + Decoder TC-DEC-6/11 rewritten as identity checks.
+### V3.4 Clean ALU opcode map — CLOSED AS WONTFIX
+`func = opc<4 ? opc>>1 : opc-2` is ~2 mux levels in a non-critical block
+(EX consumes the latched `rEX_aluFunc`; the #21/#22 timing work never
+touched decode). Renumbering re-breaks every binary, encoding, test, and
+formal TC for zero functional gain. The map is full *and* coherent
+post-V3.3; the derivation stays documented (§9.1) and formally pinned
+(TC-DEC-6/11). Revisit only if decode ever lands on a critical path
+(then: move ADDI/XORI to group B, `func = op[2:0]`).
+- Files: none. Gate: none (decision record).
 
-### V3.5 Byte-offset widening (if still needed after V3.1–V3.3)
-`LDB/STB off3` 0..7 → 6-bit field in space freed by V3.2. Only if
-profiler (`bench.py`) shows materialized byte addresses in hot loops.
+### V3.5 Byte-offset widening — DEFERRED (no demander)
+`cc.py` emits no `LDB`/`STB` (C subset has no byte type); the ops are
+asm-level only and their `off3` range is unpressured. Revisit with
+profiler evidence only.
 
-Phase-1 exit gate: all V3.x implemented + `ISA-3.0.md` normative-complete
-+ `sbt test` 34/34 + `test-programs-all` 49/49 both emus + coverage audit
-extends to new encodings + F4PGA flow still completes (timing re-baselined,
-not yet optimized).
+Phase-1 exit gate: all V3.x implemented/closed + `ISA-3.0.md`
+normative-complete + `sbt test` 35/35 + `test-programs-all` 50/50 both
+emus + coverage audit extends to new encodings ✓ + F4PGA flow completes:
+`make f4pga-pipsoc` → valid bitstream (sync `0009 0ff0`, 2.19 MB),
+post-route **106.19 MHz PASS at 100 MHz** (v2.1 baseline was 103.83 —
+v3 ISA timing-neutral). PHASE 1 CLOSED.
 
 ---
 
