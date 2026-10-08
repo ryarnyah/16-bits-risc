@@ -181,8 +181,8 @@
     SpinalHDL emit `dataRam_symbol0`/`dataRam_symbol1` (2×8-bit lanes);
     `main_pipsoc.cpp` `readDataMem` reads both lanes.
 
-21. **F4PGA `$buf` no-BEL fix + PipCore timing redesign** (open: 85.5 MHz
-    of 100 MHz target):
+21. **F4PGA `$buf` no-BEL fix + PipCore timing redesign** (first pass,
+    85.5 MHz — timing closed in #22):
     - Root cause of `nextpnr: no BELs remaining for $buf`: the F4PGA flow
       generated `target/gen/PipSoc.sv` **without** a hex path → `instrRom`
       uninitialized → Yosys don't-care collapse (hollow netlist,
@@ -218,6 +218,50 @@
     - Result: PnR completes, 69.96 → **85.52 MHz** (was FAIL earlier in
       placement); critical path now `dataWordAddr[7] → … → FF CE`
       (2.3 ns logic + 9.4 ns routing).
+
+22. **PipCore timing closure at 100 MHz** (PipCore.scala +
+    emulator/main_pipsoc.cpp) — rounds on top of #21:
+    - Round 1 (85.52 → 95.51 MHz, default seed):
+      1. Store handshake `stFired`: ST leaves EX one cycle after
+         `req.fire`, decided by a registered flag — the core no longer
+         reads `req.ready` at all. Removes the critical cone
+         `rEX_effAddr → isIoAddr(16b cmp) → ready → stStall → stallID
+         → CE`; `req.valid` for ST is gated by `!stFired` so the held
+         cycle cannot re-issue.
+      2. IF-latched `rID_rsAddr`/`rID_rtAddr` (`rsAddrOf`/`rtAddrOf`
+         mirror the Decoder equations on the incoming word, formally
+         asserted `when(vID)`), so regfile reads, all forwarding
+         compares and both hazard detects start from registers instead
+         of a 2-3 level decode of `rID_instr`.
+      3. `idEffAddr`: single adder with the byte/word immediate
+         pre-muxed BEFORE the add (was two parallel adders muxed after;
+         bit-identical modular addition).
+    - Round 2 (95.51 → **103.83 MHz PASS** at 100 MHz, default seed):
+      EX-stage re-decode eliminated — `rEX_rsAddr`/`rEX_rtAddr`/
+      `rEX_immEn` are latched with `rEX_instr` in the ID→EX transfer
+      (`rEX_immEn := decoder.io.isImmEn || decoder.io.isGrpBImm`), so
+      the forwarding compares and the ALU opB mux select no longer wait
+      on opcode/group-B/byte decode of `rEX_instr`.  The old
+      combinational equations survive as formal-only references
+      (`exRsAddrRef`/`exRtAddrRef` + immEn re-derivation, guarded by
+      `rEX_type =/= EMPTY` — frame-0 safe because
+      `assumeInitial(rEX_type === EMPTY)` and rEX_* are written only
+      together in an ID→EX transfer).
+    - Side effect: `rEX_instr`, `exRsAddr`, `exRtAddr` now have only
+      formal consumers → pruned from the hardware (16 FFs + decode
+      logic saved); `main_pipsoc.cpp` debug reads switched to the
+      registered equivalents (`rEX_rsAddr`/`rEX_rtAddr`), and the
+      `EX:instr=` debug fields now print `rs=/rt=`.
+    - Result: `make f4pga-pipsoc` completes end-to-end
+      (synth → PnR → fasm → frames → `f4pga/build/PipSoc.bit`, valid
+      sync word `0009 0ff0`); post-route 85.52 → 95.51 → **103.83 MHz
+      PASS at 100 MHz** (seed sweep on the round-1 netlist peaked at
+      99.38 — the structural round-2 fix was required; default seed
+      passes, no seed pinning needed).  New critical path starts at a
+      register (`ldRd → … → FF D`, 2.0 ns logic + 7.7 ns routing).
+    - Validated: 48/48 C+asm tests on BOTH emulators; 34/34 formal
+      (BMC 30 incl. the new `stFired` set/clear and
+      `rEX_rsAddr`/`rEX_rtAddr`/`rEX_immEn` equivalence asserts).
 
 ### Verification Results
 
@@ -294,10 +338,9 @@ still NOP — see `ISA-2.1.md` §11):
   - nextpnr-xilinx PnR with basys3.xdc constraints
   - FASM → frames (minimal Python parser + prjxray fasm_assembler)
   - Frames → .bit (xc7frames2bit), valid Xilinx sync word `0009 0ff0...`
-- [x] `make f4pga-pipsoc` (PipSoc): synth + PnR complete with
-  `F4PGA_PROG` baked into `f4pga/build/PipSoc.sv` (fixes `$buf` no-BEL);
-  timing **85.52 MHz FAIL at 100 MHz** — optimization in progress
-  (see fix #21)
+- [x] `make f4pga-pipsoc` (PipSoc): **complete end-to-end through
+  bitstream** — `F4PGA_PROG` baked into `f4pga/build/PipSoc.sv` (fixes
+  `$buf` no-BEL); timing **103.83 MHz PASS at 100 MHz** (fixes #21/#22)
 - [ ] `f4pga_program` needs a Basys3 board connected via USB
 
 ### GCC 15 Compatibility

@@ -234,7 +234,10 @@ public:
         auto rID_pc = soc->rootp->PipSoc__DOT__core__DOT__rID_pc;
         auto rID_ldiData = soc->rootp->PipSoc__DOT__core__DOT__rID_ldiData;
         auto ldiHeader = soc->rootp->PipSoc__DOT__core__DOT__ldiHeader;
-        auto rEX_instr = soc->rootp->PipSoc__DOT__core__DOT__rEX_instr;
+        // rEX_instr no longer exists in hardware (every consumer now reads
+        // a register latched with it); show the EX register addresses.
+        auto rEX_rsAddr = soc->rootp->PipSoc__DOT__core__DOT__rEX_rsAddr;
+        auto rEX_rtAddr = soc->rootp->PipSoc__DOT__core__DOT__rEX_rtAddr;
         auto rEX_ldiData = soc->rootp->PipSoc__DOT__core__DOT__rEX_ldiData;
         auto rWB_result = soc->rootp->PipSoc__DOT__core__DOT__rWB_result;
         auto rWB_hasRd = soc->rootp->PipSoc__DOT__core__DOT__rWB_hasRd;
@@ -246,8 +249,8 @@ public:
         printf("state=%d reqFire=%d rspFire=%d\n", dbgState, reqFire, rspFire);
         printf("ID: pc=%04x instr=%04x ldiData=%04x ldiHdr=%04x\n",
             rID_pc, rID_instr, rID_ldiData, ldiHeader);
-        printf("EX: type=%d instr=%04x ldiData=%04x\n",
-            (int)rEX_type, rEX_instr, rEX_ldiData);
+        printf("EX: type=%d rs=%d rt=%d ldiData=%04x\n",
+            (int)rEX_type, rEX_rsAddr, rEX_rtAddr, rEX_ldiData);
         printf("WB: res=%04x rd=%d hasRd=%d\n", rWB_result, rWB_rd, rWB_hasRd);
     }
 
@@ -268,7 +271,10 @@ public:
             auto rID_ldiData = r->PipSoc__DOT__core__DOT__rID_ldiData;
             auto ldiHeader = r->PipSoc__DOT__core__DOT__ldiHeader;
             auto vID = r->PipSoc__DOT__core__DOT__vID;
-            auto rEX_instr = r->PipSoc__DOT__core__DOT__rEX_instr;
+            // rEX_instr is gone from HW (all consumers registered); the
+            // EX-stage register addresses are the latched equivalents.
+            auto rEX_rsAddr = r->PipSoc__DOT__core__DOT__rEX_rsAddr;
+            auto rEX_rtAddr = r->PipSoc__DOT__core__DOT__rEX_rtAddr;
             auto rEX_hasRd = r->PipSoc__DOT__core__DOT__rEX_hasRd;
             auto rEX_rd = r->PipSoc__DOT__core__DOT__rEX_rd;
             auto rWB_rd = r->PipSoc__DOT__core__DOT__rWB_rd;
@@ -285,9 +291,9 @@ public:
             auto rf_r3 = readReg(3);
             auto rf_r4 = readReg(4);
             auto rf_r6 = readReg(6);
-            printf("[%ld] PC=%04x  ID:pc=%04x instr=%04x ldi=%04x hdr=%04x v=%d  EX:instr=%04x v=%d isLD=%d isST=%d rd=%d alu=%04x br=%d  WB:rd=%d has=%d ld=%d res=%04x stl=%d  R1=%04x R2=%04x R3=%04x R4=%04x R6=%04x fb=%04x\n",
+            printf("[%ld] PC=%04x  ID:pc=%04x instr=%04x ldi=%04x hdr=%04x v=%d  EX:rs=%d rt=%d v=%d isLD=%d isST=%d rd=%d alu=%04x br=%d  WB:rd=%d has=%d ld=%d res=%04x stl=%d  R1=%04x R2=%04x R3=%04x R4=%04x R6=%04x fb=%04x\n",
                 (long)cycle, pc_, rID_pc, rID_instr, rID_ldiData, ldiHeader, vID,
-                rEX_instr, exVld, exIsLD, exIsST, rEX_rd,
+                rEX_rsAddr, rEX_rtAddr, exVld, exIsLD, exIsST, rEX_rd,
                 aluRes_, exBrTaken_,
                 rWB_rd, rWB_hasRd, ldActive, rWB_result, stallID,
                 rf_r1, rf_r2, rf_r3, rf_r4, rf_r6,
@@ -505,8 +511,8 @@ int main(int argc, char** argv) {
                 auto exIsST = rEX_type == 3;
                 auto ldActive = ldState == 1 || ldState == 2;
                 auto rEX_rd = r->PipSoc__DOT__core__DOT__rEX_rd;
-                auto exRsAddr = r->PipSoc__DOT__core__DOT__exRsAddr;
-                auto exRtAddr = r->PipSoc__DOT__core__DOT__exRtAddr;
+                auto exRsAddr = r->PipSoc__DOT__core__DOT__rEX_rsAddr;
+                auto exRtAddr = r->PipSoc__DOT__core__DOT__rEX_rtAddr;
                 auto rWB_rd = r->PipSoc__DOT__core__DOT__rWB_rd;
                 auto rWB_hasRd = r->PipSoc__DOT__core__DOT__rWB_hasRd;
                 auto aluRes = r->PipSoc__DOT__core__DOT__exResult;

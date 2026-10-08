@@ -96,6 +96,17 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // v2.1 §4.6: byte-memory access (LDB/STB) — selects the byte lane on
   // writeback and sets DataBusReq.isByte (SoC masks the other lane).
   private val rEX_byte = Reg(Bool()) init False
+  // Round-2 FPGA timing: register-file addresses and immediate-enable for
+  // the EX instruction, latched together with rEX_instr in the ID→EX
+  // transfer.  Re-deriving them from rEX_instr in EX (opcode / group-B /
+  // byte decode, 2-3 levels) put that decode in front of the forwarding
+  // compares feeding the ALU operand mux — the head of the
+  // rEX_instr → ALU → rWB_result critical path.  The old equations are
+  // asserted equivalent in the formal section (guarded by rEX_type =/=
+  // EMPTY, the only state where the class flags are meaningful).
+  private val rEX_rsAddr = Reg(UInt(3 bits)) init 0
+  private val rEX_rtAddr = Reg(UInt(3 bits)) init 0
+  private val rEX_immEn = Reg(Bool()) init False
 
   // v2.1 §5.4: HALT freezes fetch/decode; set when HALT leaves ID, cleared by
   // the debug/bus commands 0x03/0x04/0x05 (flsPipeline).
@@ -274,19 +285,15 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // =========================================================================
   // EX-stage register addresses (for forwarding)
   // =========================================================================
-  // Rs port: BR/JMP/group-B immediates read [11:9]; byte memory (LDB/STB,
-  // rEX_byte) reads its base from [5:3]; everything else reads [8:6].
-  // CALL leaves [8:6] (its target rides the rt port; the rs value is unused).
+  // Delivered by registers (rEX_rsAddr/rEX_rtAddr) instead of being
+  // re-derived from rEX_instr here — the re-derivation (opcode/group-B
+  // compare + byte mux) was the head of the forwarding→ALU critical cone
+  // and is now only elaborated for formal (exRsAddrRef/exRtAddrRef below,
+  // inside GenerationFlags.formal).
   private val exIsGrpBImm = (rEX_instr(15 downto 12) === B"1011") &&
     (rEX_instr(8 downto 6).asUInt >= 3)
-  private val exRsAddr = ((rEX_type === InstrType.BR || rEX_type === InstrType.JMP ||
-    exIsGrpBImm) ? rEX_instr(11 downto 9).asBits |
-    (rEX_byte ? rEX_instr(5 downto 3).asBits |
-      rEX_instr(8 downto 6).asBits)).asUInt
-  // Rt port: ST/STB read the store data from [11:9]; BR reads its second
-  // operand from [8:6]; CALL reads Rtarget from [5:3]; others [5:3].
-  private val exRtAddr = Mux(rEX_type === InstrType.ST, rEX_instr(11 downto 9).asUInt,
-    Mux(rEX_type === InstrType.BR, rEX_instr(8 downto 6).asUInt, rEX_instr(5 downto 3).asUInt))
+  private val exRsAddr = rEX_rsAddr
+  private val exRtAddr = rEX_rtAddr
 
   // =========================================================================
   // LD State Machine — Transitions
@@ -539,9 +546,12 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // always uses the CURRENT rEX_* values regardless of ordering.
 
   // Immediate enable for ALU operands (v2.1 §4.5: group-B immediates
-  // ANDI/ORI/SLLI/SRLI/SRAI ride the same path with rEX_sext zero-extended)
-  private val exIsImmEn = rEX_instr(15 downto 12) === 0x01 ||
-    rEX_instr(15 downto 12) === 0x03 || exIsGrpBImm
+  // ANDI/ORI/SLLI/SRLI/SRAI ride the same path with rEX_sext zero-extended).
+  // Delivered by rEX_immEn (latched in ID→EX from decoder.io.isImmEn ||
+  // decoder.io.isGrpBImm): the EX re-derivation (two opcode compares +
+  // group-B compare) was the select path of the ALU opB mux on the same
+  // critical cone as the forwarding compares.
+  private val exIsImmEn = rEX_immEn
 
   alu.io.rsVal := exFwdRsVal
   alu.io.opB := Mux(exIsImmEn, rEX_sext, exFwdRtVal)
@@ -688,6 +698,11 @@ case class PipCore() extends Component with CoreBusIoComponent {
       rEX_ldiData := decoder.io.isLDI8 ?
         (B(0, 8 bits) ## rID_instr(7 downto 0)) | rID_ldiData
       rEX_byte := idIsByteMem
+      // Round-2 timing: EX-stage addresses / immediate-enable ride along
+      // with rEX_instr so EX never re-decodes them (see declarations).
+      rEX_rsAddr := rID_rsAddr
+      rEX_rtAddr := rID_rtAddr
+      rEX_immEn := decoder.io.isImmEn || decoder.io.isGrpBImm
 
       rEX_aluFunc := decoder.io.aluFunc
       rEX_type := idType
@@ -861,6 +876,28 @@ case class PipCore() extends Component with CoreBusIoComponent {
     when(vID) {
       assert(rID_rsAddr === idRsAddr)
       assert(rID_rtAddr === idRtAddr)
+    }
+
+    // ======================================================================
+    // Round-2: EX addresses / immediate-enable are the values latched in
+    // ID→EX and must equal the OLD combinational decode of the same
+    // instruction (exRsAddrRef/exRtAddrRef) — this proves the swap to
+    // registered delivery is behaviour-preserving for forwarding, the ALU
+    // opB mux and exResult.  Guard: frame 0 assumes rEX_type === EMPTY, and
+    // rEX_type only becomes non-EMPTY via an ID→EX transfer, which writes
+    // rEX_rsAddr/rEX_rtAddr/rEX_immEn in the same block as rEX_instr.
+    // ======================================================================
+    val exRsAddrRef = ((rEX_type === InstrType.BR || rEX_type === InstrType.JMP ||
+      exIsGrpBImm) ? rEX_instr(11 downto 9).asBits |
+      (rEX_byte ? rEX_instr(5 downto 3).asBits |
+        rEX_instr(8 downto 6).asBits)).asUInt
+    val exRtAddrRef = Mux(rEX_type === InstrType.ST, rEX_instr(11 downto 9).asUInt,
+      Mux(rEX_type === InstrType.BR, rEX_instr(8 downto 6).asUInt, rEX_instr(5 downto 3).asUInt))
+    when(rEX_type =/= InstrType.EMPTY) {
+      assert(rEX_rsAddr === exRsAddrRef)
+      assert(rEX_rtAddr === exRtAddrRef)
+      assert(rEX_immEn === (rEX_instr(15 downto 12) === 0x01 ||
+        rEX_instr(15 downto 12) === 0x03 || exIsGrpBImm))
     }
 
     // ======================================================================
