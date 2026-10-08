@@ -128,21 +128,28 @@ v3 ISA timing-neutral). PHASE 1 CLOSED.
    formal latch asserts kept as second net (they now verify the move was
    verbatim). Gate: `sbt test` 35/35 ✓, 50/50 both emus ✓, zero
    `examples/` diff (hex-identical) ✓.
-2. **Pipeline bundles**: `EX_Reg`/`ID_Reg` structs replace 12 loose
-   `rEX_*` regs; `InstrType`/`LdPhase` move to `Types.scala`.
-   Flush/stall/halt touch one object.
+2. **Pipeline bundles — DEFERRED (except enums, DONE).** Rationale:
+   flush is already single-point (`rEX_type:=EMPTY`, `vID/vWB:=False`);
+   the real fragilities are ordering + feedback protocols + the LD FSM's
+   direct `rEX_type` write (tasks 3/4, which restructure rather than
+   rename). A ~150-site bundle rename carries init-semantics risk for
+   readability only — revisit post-Phase-3 if stages are added/removed.
+   `InstrType`/`LdPhase` moved to `Types.scala` (same package, zero-risk).
 3. **Explicit next-state**: replace source-order-dependent
    EX→WB-before-ID→EX (`PipCore.scala:583`) + `rWbHasExRes`/`stFired`
    feedback protocols with `next_*` wires + single register assignment.
 4. **Extract `DebugBridge`** (cmd `0x03/04/05/06/08` handling duplicated in
    `Core.scala:163-177`, `PipCore.scala:752-766`) and `LoadStoreUnit`
    (LD FSM + `ldIssueStall` + byte-lane logic).
-5. **Move inline formal** (`Decoder.scala:194-331`,
-   `PipCore.scala:788-1202`, ~40% of files) into `src/test` suites;
-   keep only port-level contracts at the component.
-6. **Docs**: refresh or delete stale `ANALYZE.md` (documents removed
-   `stallBrId`, fixed Bugs #1/#2 — actively misleading); `AGENTS.md`
-   per-phase status entries.
+5. **Inline formal structure — CLOSED, no change.** Evaluated: the
+   `*FormalTest.scala` runners only invoke `GenerationFlags.formal` blocks
+   that MUST live inside the components (they reference private pipeline
+   signals; SpinalHDL has no out-of-component access). Inline formal with
+   TC headers is the correct pattern for this toolchain, not a smell.
+6. **Docs** (DONE): deleted stale `ANALYZE.md` (documented removed
+   `stallBrId`, deleted EX-ALU→ID forwarding, pre-v3 ISA — actively
+   misleading, unmaintained). Single source of truth: `ISA-3.0.md` +
+   code comments + this plan.
 
 Phase-2 exit gate: zero duplicated decode equations (grep), no behavior
 change (`test-programs-all` 50/50 byte-identical `.hex` before/after).

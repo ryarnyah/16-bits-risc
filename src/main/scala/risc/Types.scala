@@ -9,6 +9,17 @@ object CoreState extends SpinalEnum {
   val IDLE, FETCH, DECODE, LDI_FETCH, WRITEBACK, HALT = newElement()
 }
 
+/** ID→EX instruction class (PipCore). Single enum makes illegal
+  * state combinations unrepresentable. */
+object InstrType extends SpinalEnum {
+  val EMPTY, ALU, LD, ST, JMP, BR, LDI, CALL = newElement()
+}
+
+/** Load-data FSM phases (PipCore LD unit). */
+object LdPhase extends SpinalEnum {
+  val IDLE, WAIT_BUS, DATA_READY = newElement()
+}
+
 case class CoreConfig()
 
 case class CoreBusIo() extends Bundle with IMasterSlave {

@@ -7,14 +7,6 @@ import spinal.lib._
 
 import scala.language.postfixOps
 
-object InstrType extends SpinalEnum {
-  val EMPTY, ALU, LD, ST, JMP, BR, LDI, CALL = newElement()
-}
-
-object LdPhase extends SpinalEnum {
-  val IDLE, WAIT_BUS, DATA_READY = newElement()
-}
-
 case class PipCore() extends Component with CoreBusIoComponent {
   val io: CoreIo = CoreIo()
   io.bus.cmd.asSlave()
