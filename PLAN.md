@@ -59,28 +59,43 @@ reduces relaxation to a uniform exact-inverse far form
 - Gate: 49/49 both emus ✓, PipCoreSimTest 26/26 ✓, `sbt test` 35/35 ✓
   (formal BMC30 Decoder/Core/PipCore), isa_coverage clean ✓.
 
-### V3.3 Single-word constants: `LDIH` + retire 2-word `LDI` (largest RTL deletion)
-Why: 2-word `LDI` forces `ldiPending/ldiHeader` FSMs, `stallLdiId`,
-`LDI_FETCH` state, PC+=4 special cases in both cores + formal + emulator.
-`LDIH Rd,#imm8` in reserved `mf=11` slot (`Rd[15:8]=imm8`, low preserved):
-any 16-bit const = `LDI8`+`LDIH` (2 words — same size, no fetch FSM).
-- Files: `Decoder.scala` (`mf=11`), both cores (delete LDI path, keep
-  LDI8/LDIH on ALU path), `asm.py` (synthesize arbitrary const, delete
-  narrowing fixpoint), `cc.py` const emission.
-- Gate: `ldiPending`/`LDI_FETCH` grep-clean + full suite + formal
-  (LDI TCs replaced by LDIH TCs).
+### V3.3 Single-word constants: `LDIH` + retire 2-word `LDI` — CLOSED AS IMPOSSIBLE
+Bit budget proof: group F leaves 9 bits after `op+Rd`; `LDI8` spends
+1 (marker) + 8 (imm). Any sibling needs `b8=0,mf=11` markers, leaving only
+`payload[5:0]` = 6 bits. Byte-granular high/low synthesis in 2 words is
+therefore unrepresentable; 3+-word syntheses lose to `LDI` on both size
+*and* cycles, and a preserving `LDIH` would need a new EX read-merge
+forwarding path (net complexity gain, not deletion). `LDI` stays;
+revisit only if the format ever grows a byte.
+- What V3.3 becomes instead: PC-relative control (old V3.4 core, now
+  encodable in the freed `0xD/0xE`): `CALLR`/`JMPR` below. Dual immediate
+  forms (`ADDI` 3-op vs group-B 2-op) stay deliberately — unifying saves
+  ~10 assembler lines at the price of breaking every group-B user.
 
-### V3.4 PC-relative CALL/JMP + unified immediate forms
-Why: `CALL Rlink,Rtarget` needs a preceding `LDI` (2–3 words) per call;
-`ADDI`(3-op) vs `ANDI`(2-op in-place) forces assembler copy-expansion.
-`CALLR Rlink,+off9` in full 9-bit payload; pick one immediate form
-(recommend in-place + `MOV`, smaller decoder).
-- Files: `Decoder.scala`, both cores, `asm.py` (delete 3-op expansion),
-  `cc.py` call sequences + mask emission.
-- Gate: `call_deep.c` + `call_test.asm` pass with fewer words
-  (assert word count in test).
+### V3.3 PC-relative control: `CALLR` / `JMPR` (in freed `0xD`/`0xE`) [DONE]
+Why: every label call/jump currently pays `LDI` materialization (2 words)
+plus the jump (1 word); runtime calls cost 5 words. Both new ops fit
+*exactly* with no reserved remnants, delete most remaining `LDI` uses
+(the fetch FSM stays, but goes rare), and shrink loop bodies (helps the
+3 far-`BR` sites from V3.2).
+- `CALLR Rlink, off9`: `1101 | Rlink | off9` (off9 = instr[8:0] signed,
+  words, ±256). `R[Rlink] = PC_next`; `PC = PC_next + sext(off9)*2`.
+  All 512 patterns legal. Assembler `CALLR Rlink, label`; far targets
+  expand to `LDI R4,#label ; CALL Rlink,R4` (Rlink≠R4; cc.py uses R5).
+- `JMPR off12`: `1110 | off12` (off12 = instr[11:0] signed, words, ±2048).
+  `PC = PC_next + sext(off12)*2`. All 4096 patterns legal. Assembler
+  `JMPR label`; far targets expand to `JMP label`.
+- Register `JMP Rs` / `CALL Rlink,Rtarget` unchanged (RET, returns,
+  computed targets).
+- Files: `Decoder.scala` (isCALLR/isJMPR, hasRd+=CALLR, drop 0xD/0xE
+  reserved clause), both cores (ID-resolved target rides `rEX_jmpTarget`,
+  EX untouched), `asm.py` (encoders + relaxation entries + far
+  expansions), `cc.py` (all label jumps → JMPR, runtime calls → CALLR),
+  new `callr_test.asm`, `isa_coverage.py`, `run_tests.py` (+1 test).
+- Gate: 50/50 both emus ✓, `sbt test` 35/35 ✓ (BMC30 incl. new
+  CALLR/JMPR asserts), zero `LDI+JMP` sequences in fresh output ✓.
 
-### V3.5 Clean ALU opcode map (do last — touches every instruction)
+### V3.4 Clean ALU opcode map (do last — touches every instruction)
 Why: `aluFunc = opc<4 ? opc>>1 : opc-2` (`Decoder.scala:184-185`) is a
 historical artifact; renumber ALU ops 0–7 so `aluFunc = op[2:0]`,
 single-bit imm select. Only after V3.2 frees opcodes.
@@ -88,7 +103,7 @@ single-bit imm select. Only after V3.2 frees opcodes.
   `asm.py` OPCODES, `cc.py` emitters, every example recompiled.
 - Gate: full suite + Decoder TC-DEC-6/11 rewritten as identity checks.
 
-### V3.6 Byte-offset widening (if still needed after V3.1–V3.4)
+### V3.5 Byte-offset widening (if still needed after V3.1–V3.3)
 `LDB/STB off3` 0..7 → 6-bit field in space freed by V3.2. Only if
 profiler (`bench.py`) shows materialized byte addresses in hot loops.
 

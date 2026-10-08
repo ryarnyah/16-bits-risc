@@ -79,7 +79,7 @@ main:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R2, [R1 + 0]
-    JMP .fc1
+    JMPR .fc1
 .fe3:
     XOR R1, R0, R0
     ST R1, [R7]
@@ -140,7 +140,7 @@ main:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R2, [R1 + 0]
-    JMP .fc4
+    JMPR .fc4
 .fe6:
     LDI R1, #-204
     ADD R1, R1, R6

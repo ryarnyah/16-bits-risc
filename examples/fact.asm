@@ -29,7 +29,7 @@ fact:
     SLT R3, R1, R2
     BR NZ, R3, .el1
     ADDI R1, R0, #1
-    JMP fact_epi
+    JMPR fact_epi
 .el1:
 .ei2:
     LD R1, [R6 -1]
@@ -46,21 +46,15 @@ fact:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr3
-    LDI R1, #fact
-    JMP R1
-.cr3:
+    CALLR R5, fact
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mul16_ret4
-    LDI R4, #__mul16
-    LD R1, [R7 +1]
-    JMP R4
-.mul16_ret4:
+    CALLR R5, __mul16
+.mul16_ret3:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
     LD R5, [R7]
@@ -86,10 +80,7 @@ main:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr5
-    LDI R1, #fact
-    JMP R1
-.cr5:
+    CALLR R5, fact
 main_epi:
     ADDI R7, R7, #2
     LD R6, [R7]

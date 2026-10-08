@@ -45,10 +45,7 @@ main:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr1
-    LDI R1, #callee
-    JMP R1
-.cr1:
+    CALLR R5, callee
     ST R1, [R6 -1]
     LD R1, [R6 -1]
 main_epi:

@@ -19,11 +19,11 @@ import scala.language.postfixOps
  *   [5:0]   imm6    — 6-bit immediate/offset (overlaps Rt)
  * }}}
  *
- * == Opcode map (v3.2) ==
+ * == Opcode map (v3.3) ==
  * {{{
  *   0x0 : ADD    0x4 : SUB    0x8 : SRL    0xC : BR (v3.2, cond in [8:7])
- *   0x1 : ADDI  0x5 : AND    0x9 : LD     0xD : reserved (v3.2, was BNE)
- *   0x2 : XOR   0x6 : OR     0xA : ST     0xE : reserved (v3.2, was BLT)
+ *   0x1 : ADDI  0x5 : AND    0x9 : LD     0xD : CALLR (v3.3, rel link-call)
+ *   0x2 : XOR   0x6 : OR     0xA : ST     0xE : JMPR (v3.3, rel jump)
  *   0x3 : XORI  0x7 : SLL    0xB : JMP+gB 0xF : LDI+gF
  * }}}
  *
@@ -93,6 +93,12 @@ case class DecoderIo() extends Bundle {
   val isGrpBImm: Bool = out Bool ()
   /** True for CALL Rlink,Rtarget (cf=001, payload[2:0]=000). */
   val isCALL: Bool = out Bool ()
+  /** True for CALLR Rlink,off9 (v3.3, opcode 0xD): PC-relative link-call,
+    * target = PC_next + sext(instr[8:0])*2. All 512 patterns legal. */
+  val isCALLR: Bool = out Bool ()
+  /** True for JMPR off12 (v3.3, opcode 0xE): PC-relative jump,
+    * target = PC_next + sext(instr[11:0])*2. All 4096 patterns legal. */
+  val isJMPR: Bool = out Bool ()
   /** True for HALT (cf=010, Rd=000, payload=0). */
   val isHALT: Bool = out Bool ()
   /** True for LDI8 (b8=1): 1-word zero-extended constant load. */
@@ -137,10 +143,13 @@ case class Decoder() extends Component {
   // ── v2.0 groups ────────────────────────────────────────────────────
   io.isLD  := opc === B"1001"
   io.isST  := opc === B"1010"
-  // v3.2: single branch opcode 0xC (cond in [8:7]); 0xD/0xE are reserved.
+  // v3.2: single branch opcode 0xC (cond in [8:7]).
   io.isBR := opc === B"1100"
   io.brCC := io.instr(8 downto 7)
   io.isBranch := io.isBR
+  // v3.3: PC-relative control fills the freed 0xD/0xE (fully legal).
+  io.isCALLR := opc === B"1101"
+  io.isJMPR := opc === B"1110"
 
   // ── Bank B: group 0xB ──────────────────────────────────────────────
   io.isJMP := (opc === B"1011") && (cf === B"000") && (payload === B"000000")
@@ -155,18 +164,19 @@ case class Decoder() extends Component {
   io.isLDB := (opc === B"1111") && !b8 && (mf === B"01")
   io.isSTB := (opc === B"1111") && !b8 && (mf === B"10")
 
-  // ── Reserved = NOP (ISA v2.1 §2.6; v3.2 adds freed 0xD/0xE) ─────────
+  // ── Reserved = NOP (ISA v2.1 §2.6) ─────────────────────────────────
   io.isReserved :=
     ((opcU <= 8) && !bankAValid) ||
     ((opc === B"1011") && !(io.isJMP || io.isCALL || io.isHALT || io.isGrpBImm)) ||
-    ((opc === B"1111") && !(io.isLDI || io.isLDI8 || io.isLDB || io.isSTB)) ||
-    (opc === B"1101") || (opc === B"1110")
+    ((opc === B"1111") && !(io.isLDI || io.isLDI8 || io.isLDB || io.isSTB))
+  // NOTE (v3.3): 0xD/0xE are fully legal (CALLR/JMPR) — no reserved clause.
 
   // ── Aggregate classes ──────────────────────────────────────────────
   io.isALU := baseAlu || io.isGrpBImm
   io.isImmEn := immOp
   io.immZext := io.isGrpBImm
-  io.hasRd := io.isALU || io.isLD || io.isLDI || io.isLDI8 || io.isLDB || io.isCALL
+  io.hasRd := io.isALU || io.isLD || io.isLDI || io.isLDI8 || io.isLDB ||
+    io.isCALL || io.isCALLR
 
   io.rdField := io.instr(11 downto 9)
   io.rsReg   := io.instr(8 downto 6)
@@ -216,13 +226,19 @@ case class Decoder() extends Component {
     when(io.isGrpBImm) { assert(io.isALU) }
     when((opcU > 8) && !io.isGrpBImm) { assert(!io.isALU) }
 
-    /* TC-DEC-2: Per-opcode group detection (v3.2: single branch 0xC) */
+    /* TC-DEC-2: Per-opcode group detection (v3.3: CALLR=0xD, JMPR=0xE) */
     when(opc === B"1001") { assert(io.isLD);  assert(!io.isST) }
     when(opc === B"1010") { assert(io.isST);  assert(!io.isLD) }
     when(opc === B"1011") { assert(!io.isBranch) }
     when(opc === B"1100") { assert(io.isBR); assert(io.isBranch); assert(!io.isReserved) }
-    when(opc === B"1101") { assert(io.isReserved); assert(!io.isBranch) }
-    when(opc === B"1110") { assert(io.isReserved); assert(!io.isBranch) }
+    when(opc === B"1101") {
+      assert(io.isCALLR); assert(!io.isReserved); assert(!io.isBranch)
+      assert(io.hasRd)
+    }
+    when(opc === B"1110") {
+      assert(io.isJMPR); assert(!io.isReserved); assert(!io.isBranch)
+      assert(!io.hasRd)
+    }
     when(opc === B"1111") { assert(!io.isALU) }
     when(io.isLDI) { assert(opc === B"1111"); assert(!io.isLDI8) }
     /* v3.2: branch condition mirrors instr[8:7] */
@@ -238,9 +254,9 @@ case class Decoder() extends Component {
     assert(io.immZext === io.isGrpBImm)
     assert(io.isGrpBImm === ((opc === B"1011") && (cfU >= 3)))
 
-    /* TC-DEC-4: hasRd derivation */
+    /* TC-DEC-4: hasRd derivation (v3.3: CALLR writes the link register) */
     assert(io.hasRd === (io.isALU || io.isLD || io.isLDI || io.isLDI8 ||
-      io.isLDB || io.isCALL))
+      io.isLDB || io.isCALL || io.isCALLR))
     /* Stores/branches/jumps/HALT never write a register */
     when(io.isST || io.isSTB || io.isBranch || io.isJMP || io.isHALT ||
       io.isReserved) { assert(!io.hasRd) }
@@ -322,6 +338,8 @@ case class Decoder() extends Component {
     cover(opc === B"1001")
     cover(opc === B"1111")
     cover(io.isCALL)
+    cover(io.isCALLR)
+    cover(io.isJMPR)
     cover(io.isHALT)
     cover(io.isGrpBImm)
     cover(io.isLDI8)

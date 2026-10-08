@@ -57,10 +57,7 @@ triple:
     LD R2, [R7]
     ADDI R7, R7, #2
     LD R3, [R7]
-    LDI R5, #.cr1
-    LDI R1, #add
-    JMP R1
-.cr1:
+    CALLR R5, add
     ST R1, [R7]
     ADDI R7, R7, #-2
     LD R1, [R6 -1]
@@ -70,10 +67,7 @@ triple:
     LD R2, [R7]
     ADDI R7, R7, #2
     LD R3, [R7]
-    LDI R5, #.cr2
-    LDI R1, #add
-    JMP R1
-.cr2:
+    CALLR R5, add
 triple_epi:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
@@ -96,10 +90,7 @@ main:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr3
-    LDI R1, #triple
-    JMP R1
-.cr3:
+    CALLR R5, triple
 main_epi:
     ADDI R7, R7, #2
     LD R6, [R7]

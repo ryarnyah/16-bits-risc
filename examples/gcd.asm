@@ -40,10 +40,7 @@ gcd:
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mod16_ret3
-    LDI R4, #__mod16
-    LD R1, [R7 +1]
-    JMP R4
+    CALLR R5, __mod16
 .mod16_ret3:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
@@ -53,7 +50,7 @@ gcd:
     ST R1, [R6 -2]
     LD R1, [R6 -1]
     ST R1, [R6 -3]
-    JMP .w1
+    JMPR .w1
 .we2:
     LD R1, [R6 -2]
 gcd_epi:
@@ -83,10 +80,7 @@ main:
     LD R2, [R7]
     ADDI R7, R7, #2
     LD R3, [R7]
-    LDI R5, #.cr4
-    LDI R1, #gcd
-    JMP R1
-.cr4:
+    CALLR R5, gcd
 main_epi:
     ADDI R7, R7, #2
     LD R6, [R7]

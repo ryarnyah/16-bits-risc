@@ -276,6 +276,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val idBrTaken =
     decoder.io.isJMP ||
     decoder.io.isCALL ||
+    decoder.io.isCALLR ||
+    decoder.io.isJMPR ||
     (decoder.io.isBranch &&
       ((decoder.io.brCC === B"00" && idFwdRsVal === 0) ||
         (decoder.io.brCC === B"01" && idFwdRsVal =/= 0) ||
@@ -286,7 +288,18 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // critical path.  Stored as rEX_jmpTarget in the ID→EX transfer.
   // JMP: target = R[Rs] (instr[11:9]); CALL: target = R[Rtarget] (instr[5:3],
   // read through the rt port — idRtAddr falls through to rtReg for CALL).
-  private val idJmpTarget = Mux(decoder.io.isCALL, idFwdRtVal, idFwdRsVal)
+  // v3.3: CALLR/JMPR targets resolve here (PC_next + scaled offset), so EX
+  // needs no new path — rEX_jmpTarget carries the final address for all
+  // four control transfers.
+  private val idCallOff9 = decoder.io.instr(8 downto 0).asSInt.resize(16).asBits
+  private val idCallTarget =
+    (rID_pc.asSInt + 2 + (idCallOff9(14 downto 0) ## B"0").asSInt).asBits.resized
+  private val idJmpOff12 = decoder.io.instr(11 downto 0).asSInt.resize(16).asBits
+  private val idJmpRelTarget =
+    (rID_pc.asSInt + 2 + (idJmpOff12(14 downto 0) ## B"0").asSInt).asBits.resized
+  private val idJmpTarget = Mux(decoder.io.isCALLR, idCallTarget,
+    Mux(decoder.io.isCALL, idFwdRtVal,
+      Mux(decoder.io.isJMPR, idJmpRelTarget, idFwdRsVal)))
 
   // =========================================================================
   // EX-stage register addresses (for forwarding)
@@ -339,8 +352,10 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // =========================================================================
 
   // Load-use hazard: EX has LD that writes a register needed by ID
-  // (LDB is an LD-type access and participates; LDI8 reads no registers.)
-  private val idNeedsRs = vID && !decoder.io.isLDI && !decoder.io.isLDI8
+  // (LDB is an LD-type access and participates; LDI8 reads no registers;
+  // v3.3 CALLR/JMPR read no registers — their Rs/Rt fields are immediates.)
+  private val idNeedsRs = vID && !decoder.io.isLDI && !decoder.io.isLDI8 &&
+    !decoder.io.isCALLR && !decoder.io.isJMPR
   // rt port readers: register ALU ops (not the in-place group-B immediates,
   // whose [5:3] field is the immediate), stores (incl. STB) and CALL
   // (Rtarget in instr[5:3]).  v3.2: branches read no Rt.
@@ -662,6 +677,11 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // reserved encodings transfer as EMPTY (no architectural effect, §2.6).
   when(decoder.io.isLDI8) { idType := InstrType.LDI }
   when(decoder.io.isCALL) { idType := InstrType.CALL }
+  // v3.3: CALLR rides the CALL path (link write + taken flush; its target
+  // is PC-relative and pre-resolved into rEX_jmpTarget below); JMPR rides
+  // the JMP path (same, no link write).
+  when(decoder.io.isCALLR) { idType := InstrType.CALL }
+  when(decoder.io.isJMPR) { idType := InstrType.JMP }
   when(decoder.io.isHALT) { idType := InstrType.EMPTY }
   when(decoder.io.isReserved) { idType := InstrType.EMPTY }
 
@@ -892,8 +912,20 @@ case class PipCore() extends Component with CoreBusIoComponent {
     // opB mux and exResult.  Guard: frame 0 assumes rEX_type === EMPTY, and
     // rEX_type only becomes non-EMPTY via an ID→EX transfer, which writes
     // rEX_rsAddr/rEX_rtAddr/rEX_immEn in the same block as rEX_instr.
-    // ======================================================================
-    val exRsAddrRef = ((rEX_type === InstrType.BR || rEX_type === InstrType.JMP ||
+    // v3.3: JMPR words (opcode 0xE) read no register — the latched address
+    // falls through to instr[8:6], so the [11:9] select applies only to
+    // real register jumps (0xB words with cf=000/payload=0).
+    // v3.3: PC-relative targets recomputed from EX state (formal mirrors
+    // of idCallTarget/idJmpRelTarget).
+    val exIsJmpRegRef = (rEX_instr(15 downto 12) === B"1011") &&
+      (rEX_instr(8 downto 6) === B"000") && (rEX_instr(5 downto 0) === B"000000")
+    val exCallOff9 = rEX_instr(8 downto 0).asSInt.resize(16).asBits
+    val exCallTargetRef =
+      (rEX_pc.asSInt + 2 + (exCallOff9(14 downto 0) ## B"0").asSInt).asBits.resized
+    val exJmpOff12 = rEX_instr(11 downto 0).asSInt.resize(16).asBits
+    val exJmpRelRef =
+      (rEX_pc.asSInt + 2 + (exJmpOff12(14 downto 0) ## B"0").asSInt).asBits.resized
+    val exRsAddrRef = ((rEX_type === InstrType.BR || exIsJmpRegRef ||
       exIsGrpBImm) ? rEX_instr(11 downto 9).asBits |
       (rEX_byte ? rEX_instr(5 downto 3).asBits |
         rEX_instr(8 downto 6).asBits)).asUInt
@@ -1015,14 +1047,22 @@ case class PipCore() extends Component with CoreBusIoComponent {
     }
 
     // == JMP (ISA §3.4 / §4.11): unconditional, no rd                     ==
+    // v3.3: JMPR (opcode 0xE) rides the same type with a pre-resolved target.
     when(pastValid() && resetn) {
       when(rEX_type === InstrType.JMP) {
         assert(exBrTaken)
         assert(!rEX_hasRd)
+        when(rEX_instr(15 downto 12) === B"1110") {
+          assert(rEX_jmpTarget === exJmpRelRef)
+        } otherwise {
+          assert(rEX_jmpTarget === exFwdRsVal)
+        }
       }
     }
 
     // == v2.1 §5.4: CALL — taken like JMP, writes the link address       ==
+    // v3.3: CALLR (opcode 0xD) rides the same type; its target is
+    // PC-relative and pre-resolved (no register read).
     when(pastValid() && resetn) {
       when(rEX_type === InstrType.CALL) {
         assert(exBrTaken)
@@ -1030,8 +1070,12 @@ case class PipCore() extends Component with CoreBusIoComponent {
         // link = address of the next instruction (PC_next, §5.4)
         assert(exResult === (rEX_pc + 2).asBits)
         assert(!io.dataBus.req.valid)
-        // target rides the jmp mux (rt port, instr[5:3])
-        assert(rEX_jmpTarget === exFwdRtVal)
+        when(rEX_instr(15 downto 12) === B"1101") {
+          assert(rEX_jmpTarget === exCallTargetRef)
+        } otherwise {
+          // target rides the jmp mux (rt port, instr[5:3])
+          assert(rEX_jmpTarget === exFwdRtVal)
+        }
       }
     }
 
@@ -1129,12 +1173,23 @@ case class PipCore() extends Component with CoreBusIoComponent {
     when(pastValid() && resetn) {
       when(past(exBrTaken)) {
         when(past(rEX_type) === InstrType.JMP) {
-          assert(pc === past(exFwdRsVal).asUInt)
+          // v3.3: register-JMP re-checks the rs forward; JMPR re-checks
+          // the pre-resolved target.
+          when(past(rEX_instr)(15 downto 12) === B"1110") {
+            assert(pc === past(rEX_jmpTarget).asUInt)
+          } otherwise {
+            assert(pc === past(exFwdRsVal).asUInt)
+          }
         }
         when(past(rEX_type) === InstrType.CALL) {
           // v2.1 §5.4: PC ← R[Rtarget] (target forwarded in ID, re-checked
-          // against the EX rt-forward like JMP does for its rs-forward)
-          assert(pc === past(exFwdRtVal).asUInt)
+          // against the EX rt-forward like JMP does for its rs-forward).
+          // v3.3: CALLR re-checks the pre-resolved target instead.
+          when(past(rEX_instr)(15 downto 12) === B"1101") {
+            assert(pc === past(rEX_jmpTarget).asUInt)
+          } otherwise {
+            assert(pc === past(exFwdRtVal).asUInt)
+          }
         }
         when(past(rEX_type) === InstrType.BR) {
           assert(pc === past(rEX_brTarget).asUInt)
@@ -1180,6 +1235,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     cover(rEX_type === InstrType.LDI)
     cover(rEX_type === InstrType.ST)
     cover(rEX_type === InstrType.JMP)
+    cover(rEX_type === InstrType.JMP && rEX_instr(15 downto 12) === B"1110")
     cover(rEX_type === InstrType.BR && exBrTaken)
     cover(rEX_type === InstrType.BR && !exBrTaken)
     cover(loadUseHazard)
@@ -1195,6 +1251,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     cover(rEX_aluFunc === B"1001")
     cover(rEX_aluFunc === B"1010")
     cover(rEX_type === InstrType.CALL)
+    cover(rEX_type === InstrType.CALL && rEX_instr(15 downto 12) === B"1101")
     cover(halted)
     cover(rEX_byte && rEX_type === InstrType.LD)
     cover(rEX_byte && rEX_type === InstrType.ST)

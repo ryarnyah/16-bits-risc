@@ -32,10 +32,10 @@ main:
     XOR R1, R2, R1
     BR NZ, R1, .el1
     LDI R1, #0x002A
-    JMP .ei2
+    JMPR .ei2
 .el1:
     XOR R1, R0, R0
-    JMP main_epi
+    JMPR main_epi
 .ei2:
 main_epi:
     ADDI R7, R7, #4

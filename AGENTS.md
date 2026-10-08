@@ -20,8 +20,10 @@
 ### Design Decisions
 
 - **Execution order (PLAN.md):** ISA v3 breaking changes → maintainability → speed
-- **ISA v3.2 (unified BR Z/NZ/MI/PL, ±64w, 0xD/0xE reserved):** DONE —
-  49/49 both emus, `sbt test` 35/35 (formal BMC30), PipCoreSimTest 26/26
+- **ISA v3.2 (unified BR Z/NZ/MI/PL, ±64w):** DONE — 49/49, `sbt test`
+  35/35, exact-inverse far form (3 sites: collatz/bench_alu)
+- **ISA v3.3 (CALLR/JMPR, LDIH proven impossible):** DONE — 50/50 both
+  emus, `sbt test` 35/35, zero stale LDI+JMP in fresh output
 
 - **Package:** `risc`
 - **Bus:** 8-bit Stream cmd/rsp + ack, per INSTRUCTIONS.md

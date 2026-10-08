@@ -28,10 +28,7 @@ main:
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mod16_ret1
-    LDI R4, #__mod16
-    LD R1, [R7 +1]
-    JMP R4
+    CALLR R5, __mod16
 .mod16_ret1:
     ADDI R7, R7, #2
     ADDI R7, R7, #2

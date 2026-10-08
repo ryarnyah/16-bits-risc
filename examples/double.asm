@@ -49,10 +49,7 @@ main:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr1
-    LDI R1, #twice
-    JMP R1
-.cr1:
+    CALLR R5, twice
 main_epi:
     ADDI R7, R7, #2
     LD R6, [R7]

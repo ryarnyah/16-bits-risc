@@ -42,10 +42,7 @@ mul:
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mul16_ret2
-    LDI R4, #__mul16
-    LD R1, [R7 +1]
-    JMP R4
+    CALLR R5, __mul16
 .mul16_ret2:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
@@ -83,10 +80,7 @@ main:
     LD R2, [R7]
     ADDI R7, R7, #2
     LD R3, [R7]
-    LDI R5, #.cr3
-    LDI R1, #mul
-    JMP R1
-.cr3:
+    CALLR R5, mul
     ST R1, [R0 +0]
     LD R1, [R0 +0]
 main_epi:

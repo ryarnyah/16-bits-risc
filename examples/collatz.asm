@@ -41,10 +41,7 @@ collatz:
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mod16_ret5
-    LDI R4, #__mod16
-    LD R1, [R7 +1]
-    JMP R4
+    CALLR R5, __mod16
 .mod16_ret5:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
@@ -66,16 +63,13 @@ collatz:
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.div16_ret6
-    LDI R4, #__div16
-    LD R1, [R7 +1]
-    JMP R4
+    CALLR R5, __div16
 .div16_ret6:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
     LD R5, [R7]
     ST R1, [R6 -2]
-    JMP .ei4
+    JMPR .ei4
 .el3:
     ADDI R1, R0, #3
     ST R1, [R7]
@@ -87,10 +81,7 @@ collatz:
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mul16_ret7
-    LDI R4, #__mul16
-    LD R1, [R7 +1]
-    JMP R4
+    CALLR R5, __mul16
 .mul16_ret7:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
@@ -101,7 +92,7 @@ collatz:
     LD R1, [R6 -1]
     ADDI R1, R1, #1
     ST R1, [R6 -1]
-    JMP .w1
+    JMPR .w1
 .we2:
     LD R1, [R6 -1]
 collatz_epi:
@@ -126,10 +117,7 @@ main:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr8
-    LDI R1, #collatz
-    JMP R1
-.cr8:
+    CALLR R5, collatz
 main_epi:
     ADDI R7, R7, #2
     LD R6, [R7]

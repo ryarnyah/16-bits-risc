@@ -29,7 +29,7 @@ dec:
     SLT R3, R1, R2
     BR NZ, R3, .el1
     XOR R1, R0, R0
-    JMP dec_epi
+    JMPR dec_epi
 .el1:
 .ei2:
     LD R1, [R6 -1]
@@ -43,10 +43,7 @@ dec:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr3
-    LDI R1, #dec
-    JMP R1
-.cr3:
+    CALLR R5, dec
     ADDI R1, R1, #1
 dec_epi:
     ADDI R7, R7, #2
@@ -70,10 +67,7 @@ main:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr4
-    LDI R1, #dec
-    JMP R1
-.cr4:
+    CALLR R5, dec
 main_epi:
     ADDI R7, R7, #2
     LD R6, [R7]

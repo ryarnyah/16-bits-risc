@@ -23,7 +23,8 @@ import run_tests, asm
 HW = (set(asm.OPCODES) | set(asm.FUNCT3) | set(asm.GRPBF) |
       {"LDI8", "CALL", "HALT", "LDB", "STB"})
 HW_ORDER = ["ADD", "ADDI", "XOR", "XORI", "SUB", "SLT", "SLTU", "AND", "OR",
-            "SLL", "SRL", "SRA", "LD", "ST", "JMP", "CALL", "HALT",
+            "SLL", "SRL", "SRA", "LD", "ST", "JMP", "CALL", "CALLR", "JMPR",
+            "HALT",
             "ANDI", "ORI", "SLLI", "SRLI", "SRAI",
             "BR", "LDI", "LDI8", "LDB", "STB"]
 

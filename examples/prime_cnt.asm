@@ -41,10 +41,7 @@ is_prime:
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mod16_ret5
-    LDI R4, #__mod16
-    LD R1, [R7 +1]
-    JMP R4
+    CALLR R5, __mod16
 .mod16_ret5:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
@@ -57,13 +54,13 @@ is_prime:
     XOR R1, R2, R1
     BR NZ, R1, .el3
     XOR R1, R0, R0
-    JMP is_prime_epi
+    JMPR is_prime_epi
 .el3:
 .ei4:
     LD R1, [R6 -1]
     ADDI R1, R1, #1
     ST R1, [R6 -1]
-    JMP .w1
+    JMPR .w1
 .we2:
     ADDI R1, R0, #1
 is_prime_epi:
@@ -105,10 +102,7 @@ main:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr8
-    LDI R1, #is_prime
-    JMP R1
-.cr8:
+    CALLR R5, is_prime
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
@@ -116,7 +110,7 @@ main:
     LD R1, [R6 -2]
     ADDI R1, R1, #1
     ST R1, [R6 -2]
-    JMP .w6
+    JMPR .w6
 .we7:
     LD R1, [R6 -1]
 main_epi:

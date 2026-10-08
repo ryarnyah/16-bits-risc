@@ -555,7 +555,7 @@ class CGen:
                 self._gen_expr(s.expr)
             else:
                 self.emit('    XOR R1, R0, R0')
-            self.emit(f'    JMP {fn}_epi')
+            self.emit(f'    JMPR {fn}_epi')
 
         elif isinstance(s, IfStmt):
             self._gen_if(s, fn, bl, cl)
@@ -566,7 +566,7 @@ class CGen:
             self.emit_lbl(start)
             self._gen_cond(s.cond, end, True)
             self._gen_stmt(s.body, fn, end, start)
-            self.emit(f'    JMP {start}')
+            self.emit(f'    JMPR {start}')
             self.emit_lbl(end)
 
         elif isinstance(s, ForStmt):
@@ -587,7 +587,7 @@ class CGen:
             self.emit_lbl(inc)
             if s.inc:
                 self._gen_expr(s.inc)
-            self.emit(f'    JMP {check}')
+            self.emit(f'    JMPR {check}')
             self.emit_lbl(end)
 
         elif isinstance(s, DoWhileStmt):
@@ -600,11 +600,11 @@ class CGen:
 
         elif isinstance(s, BreakStmt):
             if bl:
-                self.emit(f'    JMP {bl}')
+                self.emit(f'    JMPR {bl}')
 
         elif isinstance(s, ContinueStmt):
             if cl:
-                self.emit(f'    JMP {cl}')
+                self.emit(f'    JMPR {cl}')
 
         elif isinstance(s, Block):
             self._gen_block(s, fn, bl, cl)
@@ -615,7 +615,7 @@ class CGen:
         self._gen_cond(s.cond, e, True)
         self._gen_stmt(s.then, fn, bl, cl)
         if s.els:
-            self.emit(f'    JMP {end}')
+            self.emit(f'    JMPR {end}')
         self.emit_lbl(e)
         if s.els:
             if isinstance(s.els, IfStmt):
@@ -631,7 +631,7 @@ class CGen:
         if cv is not None:
             cv_bool = bool(cv)
             if cv_bool != invert:
-                self.emit(f'    JMP {target}')
+                self.emit(f'    JMPR {target}')
             return
 
         if isinstance(cond, BinaryOp):
@@ -646,7 +646,7 @@ class CGen:
                     m = self.L('la')
                     self._gen_cond(cond.left, m, True)
                     self._gen_cond(cond.right, m, True)
-                    self.emit(f'    JMP {target}')
+                    self.emit(f'    JMPR {target}')
                     self.emit_lbl(m)
                 return
             if op == TOK_LOR:
@@ -654,7 +654,7 @@ class CGen:
                     m = self.L('lo')
                     end = self.L('lor')
                     self._gen_cond(cond.left, m, True)
-                    self.emit(f'    JMP {end}')
+                    self.emit(f'    JMPR {end}')
                     self.emit_lbl(m)
                     self._gen_cond(cond.right, target, True)
                     self.emit_lbl(end)
@@ -662,7 +662,7 @@ class CGen:
                     m = self.L('lo')
                     self._gen_cond(cond.left, m, False)
                     self._gen_cond(cond.right, m, False)
-                    self.emit(f'    JMP {target}')
+                    self.emit(f'    JMPR {target}')
                     self.emit_lbl(m)
                 return
 
@@ -809,7 +809,7 @@ class CGen:
             en = self.L('cn')
             self._gen_cond(e.cond, el, True)
             self._gen_expr(e.t)
-            self.emit(f'    JMP {en}')
+            self.emit(f'    JMPR {en}')
             self.emit_lbl(el)
             self._gen_expr(e.e)
             self.emit_lbl(en)
@@ -947,10 +947,8 @@ class CGen:
         self.emit('    ADDI R7, R7, #-2')
         self.emit('    ST R1, [R7]')
         self.emit('    ADDI R7, R7, #-2')
-        self.emit(f'    LDI R5, #{ret}')
-        self.emit(f'    LDI R4, #__{name}')
-        self.emit('    LD R1, [R7 +1]')     # v3.1: word offset (was +2 bytes)
-        self.emit(f'    JMP R4')
+        # v3.3: CALLR sets R5 itself (saves LDI+LDI+LD+JMP = 4-5 words).
+        self.emit(f'    CALLR R5, __{name}')
         self.emit_lbl(ret)
         self.emit('    ADDI R7, R7, #2')
         self.emit('    ADDI R7, R7, #2')
@@ -994,7 +992,7 @@ class CGen:
             en = self.L('ne')
             self.emit(f'    BR Z, R1, {t}')
             self.emit('    XOR R1, R0, R0')
-            self.emit(f'    JMP {en}')
+            self.emit(f'    JMPR {en}')
             self.emit_lbl(t)
             self.emit('    ADDI R1, R0, #1')
             self.emit_lbl(en)
@@ -1089,11 +1087,10 @@ class CGen:
         for i in range(min(n, 3)):
             self.emit('    ADDI R7, R7, #2')
             self.emit(f'    LD R{i+2}, [R7]')
-        ret = self.L('cr')
-        self.emit(f'    LDI R5, #{ret}')
-        self.emit(f'    LDI R1, #{e.name}')
-        self.emit(f'    JMP R1')
-        self.emit_lbl(ret)
+        # v3.3: CALLR writes the link itself — no ret materialization.
+        # (Far targets expand in the assembler with an SP-balanced R4
+        # spill, so arg3 in R4 survives.)
+        self.emit(f'    CALLR R5, {e.name}')
         if n > 3:
             off = (n - 3) * 2
             if -32 <= off <= 31:
@@ -1280,15 +1277,16 @@ def peephole(asm):
         if s == ';':
             i += 1
             continue
-        # JMP x; JMP y -> JMP x
+        # JMP/JMPR x; JMP/JMPR y -> first (second is unreachable)
         if i + 1 < len(lines):
             ns = lines[i+1].strip()
-            if s.startswith('JMP ') and ns.startswith('JMP '):
+            if (s.startswith('JMP ') or s.startswith('JMPR ')) and \
+               (ns.startswith('JMP ') or ns.startswith('JMPR ')):
                 i += 1
                 continue
-            # JMP x; x: -> remove JMP
-            if s.startswith('JMP ') and ns.endswith(':'):
-                tgt = s[4:].strip()
+            # JMP/JMPR x; x: -> remove jump (falls through to target)
+            if (s.startswith('JMP ') or s.startswith('JMPR ')) and ns.endswith(':'):
+                tgt = s.split(None, 1)[1].strip()
                 lbl = ns[:-1].strip()
                 if tgt == lbl:
                     i += 1

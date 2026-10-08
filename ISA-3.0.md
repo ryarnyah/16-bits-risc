@@ -45,10 +45,28 @@ Replaces v2.1 opcodes `0xC/0xD/0xE` (`BEQ`/`BNE`/`BLT`):
   `BGE/BLE` = `SLT+BR Z`; `BLTU` = `SLTU+BR NZ`;
   `BGEU/BLEU` = `SLTU+BR Z` (scratch R4 default, `.scratch` overridable).
 
-## V3.3 Single-word constants (`LDIH`, retire 2-word `LDI`) — PROPOSED
+## V3.3 Single-word constants — CLOSED AS IMPOSSIBLE (see `PLAN.md`)
 
-## V3.4 PC-relative CALL/JMP, unified immediates — PROPOSED
+Group F has 9 bits after `op+Rd`; `LDI8` spends 1 (marker) + 8 (imm). Any
+sibling needs `b8=0,mf=11`, leaving only `payload[5:0]` = 6 bits — a
+byte-granular high half cannot be encoded, and 3+-word syntheses lose to
+2-word `LDI` on size and cycles. `LDI` stays.
 
-## V3.5 Clean ALU opcode map — PROPOSED
+## V3.4 PC-relative control — IMPLEMENTED AS V3.3 (renumbered)
 
-## V3.6 Byte-offset widening — PROPOSED (only if profiling justifies)
+### V3.3 `CALLR` / `JMPR` (opcodes `0xD`/`0xE`, fully legal, no remnants) — IMPLEMENTED
+
+| Mnemonic | Encoding | Operation |
+|:--|:--|:--|
+| `CALLR Rlink, off9` | `1101 Rlink off9` | `R[Rlink] = PC_next`; `PC = PC_next + sext(off9)*2` |
+| `JMPR off12` | `1110 off12` | `PC = PC_next + sext(off12)*2` |
+
+- `off9` = instr[8:0] signed, words, ±256. `off12` = instr[11:0] signed,
+  words, ±2048. Same already-incremented-PC rule as branches.
+- Register `JMP Rs` / `CALL Rlink,Rtarget` unchanged.
+- Assembler: `CALLR Rlink, label` (far → `LDI R4,#label ; CALL Rlink,R4`),
+  `JMPR label` (far → `JMP label`), via the shared relaxation fixpoint.
+
+## V3.4 Clean ALU opcode map — PROPOSED
+
+## V3.5 Byte-offset widening — PROPOSED (only if profiling justifies)

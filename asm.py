@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""16-bit RISC assembler: asm -> hex word list (ISA v3.2).
+"""16-bit RISC assembler: asm -> hex word list (ISA v3.3).
 
 v3.1: LD/ST offsets are in words (-32..+31, see ISA-3.0.md).
 v3.2: unified branch BR cc, Rs, target (cc in Z/NZ/MI/PL, offset +-64
-  words); opcodes 0xD/0xE reserved; far targets use exact-inverse + jump.
+  words); far targets use exact-inverse + jump.
+v3.3: PC-relative CALLR Rlink,target (+-256w) and JMPR target (+-2048w).
 
 v2.1 notes:
   * LDI auto-selects the 1-word LDI8 form when the immediate resolves to
@@ -21,7 +22,7 @@ OPCODES = {
     "ADD":  0, "ADDI": 1, "XOR": 2, "XORI": 3,
     "SUB":  4, "AND":  5, "OR":   6, "SLL":  7,
     "SRL":  8, "LD":   9, "ST":   0xA, "JMP": 0xB,
-    "BR":  0xC, "LDI": 0xF,
+    "BR":  0xC, "CALLR": 0xD, "JMPR": 0xE, "LDI": 0xF,
 }
 
 # v3.2 branch conditions (cc field in instr[8:7])
@@ -80,6 +81,14 @@ def enc_imm(op, rd, rs, imm):
 def enc_br(cc, rs, off):
     """v3.2 unified branch: BR cc, Rs, off7 (1100 | Rs | cc | off7)."""
     return (0xC << 12) | (rs << 9) | (cc << 7) | (off & 0x7F)
+
+def enc_callr(rl, off):
+    """v3.3 CALLR Rlink,off9: 1101 | Rlink | off9 (words, +-256)."""
+    return (0xD << 12) | (rl << 9) | (off & 0x1FF)
+
+def enc_jmpr(off):
+    """v3.3 JMPR off12: 1110 | off12 (words, +-2048)."""
+    return (0xE << 12) | (off & 0xFFF)
 
 def enc_grpb(cf, rd, imm):
     """Group-B immediate: ANDI/ORI/SLLI/SRLI/SRAI Rd, #imm6 (zext)."""
@@ -181,6 +190,16 @@ def instr_size(toks, relaxed, narrow, jmp_narrow, line_no):
     if m in ("BR", "B") and line_no in relaxed:
         # Far branch: exact-inverse skip + absolute jump (4 words).
         return 8
+    # v3.3: PC-relative control. Near = 1 word; far JMPR = full
+    # LDI(2w)+JMP (6B, always wide so size matches emission); far CALLR =
+    # SP-balanced scratch spill + LDI(2w) + CALL + restore (7 words = 14B,
+    # fully transparent: Rlink=R5 from cc.py never collides).
+    if m == "JMPR" and line_no in relaxed:
+        return 6
+    if m == "CALLR" and line_no in relaxed:
+        return 14
+    if m in ("CALLR", "JMPR"):
+        return 2
     if m in BRANCH2:
         # SLT/SLTU tmp + BR: 2 words, or 2 + 8 relaxed.
         return 10 if line_no in relaxed else 4
@@ -232,6 +251,22 @@ def compute_relaxed(lines, relaxed, narrow, jmp_narrow):
                     if mn == "BR" and len(ar) >= 3 and ar[2] in labels:
                         off = (labels[ar[2]] - a - 2) // 2
                         if off < -64 or off > 63:
+                            if i not in relaxed:
+                                relaxed.add(i)
+                                changed = True
+                            break
+                    # v3.3: CALLR (+-256w) / JMPR (+-2048w) relax to
+                    # materialize+absolute forms (both 1-word, own address).
+                    if mn == "CALLR" and len(ar) >= 2 and ar[1] in labels:
+                        off = (labels[ar[1]] - a - 2) // 2
+                        if off < -256 or off > 255:
+                            if i not in relaxed:
+                                relaxed.add(i)
+                                changed = True
+                            break
+                    if mn == "JMPR" and len(ar) >= 1 and ar[0] in labels:
+                        off = (labels[ar[0]] - a - 2) // 2
+                        if off < -2048 or off > 2047:
                             if i not in relaxed:
                                 relaxed.add(i)
                                 changed = True
@@ -346,6 +381,53 @@ def emit(output, addr, m, args, labels, relaxed, narrow, jmp_narrow, line_no):
 
     if m == "CALL":
         output.append((addr, enc_call(REGS[args[0]], REGS[args[1]])))
+        return addr + 2
+
+    if m == "CALLR":
+        rl = REGS[args[0]]
+        if args[1] in labels:
+            off = (labels[args[1]] - addr - 2) // 2
+        else:
+            off = parse_num(args[1])
+        if line_no in relaxed:
+            # Far form (7 words, fully transparent): spill the scratch
+            # register on the stack, materialize, call, restore. Balanced
+            # SP traffic is invisible to all code (no interrupts); the
+            # scratch defaults to R4 (JMP-label convention), R3 if the
+            # link itself is R4 (CALL reads the old value first, but the
+            # restore would then clobber the link).
+            sc = 4 if REGS[args[0]] != 4 else 3
+            target = resolve(args[1], labels)
+            output.append((addr, (0xA << 12) | (sc << 9) | (7 << 6)))
+            output.append((addr + 2, enc_imm(1, 7, 7, -2 & 0x3F)))
+            output.append((addr + 4, ((0xF << 12) | (sc << 9)) & 0xFFFF))
+            output.append((addr + 6, target & 0xFFFF))
+            output.append((addr + 8, enc_call(rl, sc)))
+            output.append((addr + 10, (0x9 << 12) | (sc << 9) | (7 << 6)))
+            output.append((addr + 12, enc_imm(1, 7, 7, 2)))
+            return addr + 14
+        if off < -256 or off > 255:
+            print(f"Warning: CALLR at byte {addr} offset {off} exceeds +-256 range",
+                  file=sys.stderr)
+        output.append((addr, enc_callr(rl, off)))
+        return addr + 2
+
+    if m == "JMPR":
+        if args[0] in labels:
+            off = (labels[args[0]] - addr - 2) // 2
+        else:
+            off = parse_num(args[0])
+        if line_no in relaxed:
+            # Far form: full LDI R4,#target ; JMP R4 (always wide).
+            target = resolve(args[0], labels)
+            output.append((addr, ((0xF << 12) | (4 << 9)) & 0xFFFF))
+            output.append((addr + 2, target & 0xFFFF))
+            output.append((addr + 4, (0xB << 12) | (4 << 9)))
+            return addr + 6
+        if off < -2048 or off > 2047:
+            print(f"Warning: JMPR at byte {addr} offset {off} exceeds +-2048 range",
+                  file=sys.stderr)
+        output.append((addr, enc_jmpr(off)))
         return addr + 2
 
     if m == "HALT":

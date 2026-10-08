@@ -144,6 +144,14 @@ case class Core() extends Component with CoreBusIoComponent {
   private val brShifted = brOff7(14 downto 0) ## B"0"
   private val brTarget = (PC.asSInt + brShifted.asSInt).asBits.resized
 
+  // === v3.3 PC-relative control targets ===
+  // CALLR: off9 = instr[8:0]; JMPR: off12 = instr[11:0] (words, same
+  // already-incremented-PC rule as branches; same shift pattern).
+  private val callOff9 = decoder.io.instr(8 downto 0).asSInt.resize(16).asBits
+  private val callShifted = callOff9(14 downto 0) ## B"0"
+  private val jmpOff12 = decoder.io.instr(11 downto 0).asSInt.resize(16).asBits
+  private val jmpShifted = jmpOff12(14 downto 0) ## B"0"
+
   // === Branch condition evaluation (v3.2: single Rs vs 0 / sign bit) ===
   private val brTaken = decoder.io.isBranch && (
     (decoder.io.brCC === B"00" && regFile.io.rsVal === 0) ||
@@ -244,6 +252,17 @@ case class Core() extends Component with CoreBusIoComponent {
         aluRes := PC.asBits
         PC := regFile.io.rtVal.asUInt
         state := CoreState.WRITEBACK
+      }
+      // v3.3: CALLR Rlink,off9 — link write like CALL, PC-relative target.
+      when(decoder.io.isCALLR) {
+        aluRes := PC.asBits
+        PC := (PC.asSInt + callShifted.asSInt).asBits.resized.asUInt
+        state := CoreState.WRITEBACK
+      }
+      // v3.3: JMPR off12 — PC-relative unconditional jump.
+      when(decoder.io.isJMPR) {
+        PC := (PC.asSInt + jmpShifted.asSInt).asBits.resized.asUInt
+        done()
       }
       when(decoder.io.isBranch) {
         when(brTaken) { PC := brTarget.asUInt }
@@ -405,6 +424,28 @@ case class Core() extends Component with CoreBusIoComponent {
         }
       }
 
+      // TC-CORE-12 (v3.3): CALLR — link write like CALL, PC-relative target
+      // (PC_at_DECODE + sext(off9)*2, no register read, no memory effect).
+      when(resetn && past(state) === CoreState.DECODE && past(decoder.io.isCALLR)) {
+        when(!busChangesState) { assert(state === CoreState.WRITEBACK) }
+        when(!busChangesPC) {
+          assert(regFile.io.wrData === past(PC).asBits)
+          assert(PC === (past(PC).asSInt + past(callShifted).asSInt).asBits.resized.asUInt)
+          assert(!io.dataBus.req.valid)
+        }
+      }
+
+      // TC-CORE-13 (v3.3): JMPR — PC-relative jump, no writeback, no memory.
+      when(resetn && past(state) === CoreState.DECODE && past(decoder.io.isJMPR)) {
+        when(!busChangesState) {
+          assert(state === CoreState.IDLE || state === CoreState.FETCH)
+        }
+        when(!busChangesPC) {
+          assert(PC === (past(PC).asSInt + past(jmpShifted).asSInt).asBits.resized.asUInt)
+          assert(!io.dataBus.req.valid)
+        }
+      }
+
       // TC-CORE-10 (v2.1): HALT is terminal — state and PC freeze until a
       // bus command (§5.4: only reset/bus reset exits HALT on this SoC).
       when(past(state) === CoreState.HALT) {
@@ -466,6 +507,8 @@ case class Core() extends Component with CoreBusIoComponent {
     cover(state === CoreState.LDI_FETCH)
     cover(state === CoreState.HALT)
     cover(decoder.io.isCALL)
+    cover(decoder.io.isCALLR)
+    cover(decoder.io.isJMPR)
     cover(decoder.io.isLDI8)
     cover(decoder.io.isLDB)
     cover(decoder.io.isSTB)

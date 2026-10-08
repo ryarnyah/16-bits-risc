@@ -43,7 +43,7 @@ main:
     LD R1, [R6 -1]
     ADDI R1, R1, #1
     ST R1, [R6 -1]
-    JMP .w1
+    JMPR .w1
 .we2:
     LD R1, [R6 -2]
 main_epi:

@@ -48,7 +48,7 @@ main:
     LD R2, [R7]
     SUB R1, R2, R1
     ST R1, [R6 -1]
-    JMP .w1
+    JMPR .w1
 .we2:
     LD R1, [R6 -2]
 main_epi:

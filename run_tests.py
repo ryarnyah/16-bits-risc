@@ -55,6 +55,7 @@ ASM_TESTS = [
     ('sra_test.asm',       0xC001, 2000),   # SRA/SRL/SRAI arithmetic shift
     ('imm_test.asm',       0x3E,   2000),   # ANDI/ORI/SLLI/SRLI/SRAI in-place
     ('call_test.asm',      0x2A,   2000),   # CALL/RET link + return
+    ('callr_test.asm',     0x2A,   2000),   # v3.3 CALLR/JMPR link + return
     ('byte_test.asm',      0x112,  4000),   # STB/LDB lanes + zero-extend
     ('ldi8_rsvd_test.asm', 0x1FF,  2000),   # LDI auto-narrow, reserved=NOP, HALT
     ('bge_test.asm',       0x01,   2000),   # BGE pseudo branches on equality

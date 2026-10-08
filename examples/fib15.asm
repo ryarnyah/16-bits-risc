@@ -29,7 +29,7 @@ fib:
     SLT R3, R1, R2
     BR NZ, R3, .el1
     LD R1, [R6 -1]
-    JMP fib_epi
+    JMPR fib_epi
 .el1:
 .ei2:
     LD R1, [R6 -1]
@@ -43,10 +43,7 @@ fib:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr3
-    LDI R1, #fib
-    JMP R1
-.cr3:
+    CALLR R5, fib
     ST R1, [R7]
     ADDI R7, R7, #-2
     LD R1, [R6 -1]
@@ -60,10 +57,7 @@ fib:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr4
-    LDI R1, #fib
-    JMP R1
-.cr4:
+    CALLR R5, fib
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
@@ -89,10 +83,7 @@ main:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr5
-    LDI R1, #fib
-    JMP R1
-.cr5:
+    CALLR R5, fib
 main_epi:
     ADDI R7, R7, #2
     LD R6, [R7]

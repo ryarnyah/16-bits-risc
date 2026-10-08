@@ -73,10 +73,7 @@ main:
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mul16_ret4
-    LDI R4, #__mul16
-    LD R1, [R7 +1]
-    JMP R4
+    CALLR R5, __mul16
 .mul16_ret4:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
@@ -96,7 +93,7 @@ main:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R2, [R1 + 0]
-    JMP .fc1
+    JMPR .fc1
 .fe3:
     XOR R1, R0, R0
     ST R1, [R7]
@@ -157,7 +154,7 @@ main:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R2, [R1 + 0]
-    JMP .fc5
+    JMPR .fc5
 .fe7:
     LDI R1, #-204
     ADD R1, R1, R6

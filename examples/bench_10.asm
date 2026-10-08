@@ -51,7 +51,7 @@ main:
     LD R1, [R6 -11]
     ADDI R2, R1, #1
     ST R2, [R6 -11]
-    JMP .fc1
+    JMPR .fc1
 .fe3:
     XOR R1, R0, R0
     ST R1, [R6 -11]
@@ -85,7 +85,7 @@ main:
     LD R1, [R6 -11]
     ADDI R2, R1, #1
     ST R2, [R6 -11]
-    JMP .fc4
+    JMPR .fc4
 .fe6:
     LD R1, [R6 -12]
 main_epi:
