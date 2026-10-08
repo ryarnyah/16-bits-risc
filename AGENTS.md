@@ -24,6 +24,8 @@
   35/35, exact-inverse far form (3 sites: collatz/bench_alu)
 - **Phase 1 (ISA v3) CLOSED:** V3.1 word-LD/ST, V3.2 BR, V3.3 CALLR/JMPR;
   V3.4 WONTFIX, V3.5 deferred, LDIH impossible. F4PGA: 106.19 MHz PASS.
+- **Phase 2 (maintainability) IN PROGRESS:** task 1 DONE (`risc.Isa`
+  shared helpers; 35/35 + 50/50, zero examples/ diff)
 
 - **Package:** `risc`
 - **Bus:** 8-bit Stream cmd/rsp + ack, per INSTRUCTIONS.md

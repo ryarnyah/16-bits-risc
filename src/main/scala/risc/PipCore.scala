@@ -48,32 +48,12 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // Register-file port addresses latched TOGETHER WITH rID_instr (FPGA
   // timing): deriving them from rID_instr in ID put 2-3 decode/mux levels
   // in front of the regfile read and every forwarding/hazard compare —
-  // the decode sat on the critical path into rEX_effAddr.  rsAddrOf/
-  // rtAddrOf mirror Decoder's idRsAddr/idRtAddr equations exactly on the
-  // incoming word (formally asserted below); for instructions that read
-  // no register the value is unused (all consumers are class-gated).
+  // the decode sat on the critical path into rEX_effAddr.  Both sides call
+  // Isa.rsAddrOf/rtAddrOf on the same word (formally asserted below);
+  // for instructions that read no register the value is unused (all
+  // consumers are class-gated).
   private val rID_rsAddr = Reg(UInt(3 bits)) init 0
   private val rID_rtAddr = Reg(UInt(3 bits)) init 0
-
-  private def rsAddrOf(i: Bits): UInt = {
-    val opc = i(15 downto 12)
-    val cf = i(8 downto 6)
-    // v3.2: BR is single-register (Rs in [11:9], cond in [8:7]).
-    val isBr = (opc === B"1100")
-    val isJmp = (opc === B"1011") && (cf === B"000") && (i(5 downto 0) === 0)
-    val isGb = (opc === B"1011") && (cf.asUInt >= 3)
-    val isByte = (opc === B"1111") && !i(8) &&
-      ((i(7 downto 6) === B"01") || (i(7 downto 6) === B"10"))
-    Mux(isBr || isJmp || isGb, i(11 downto 9).asUInt,
-      Mux(isByte, i(5 downto 3).asUInt, i(8 downto 6).asUInt))
-  }
-  private def rtAddrOf(i: Bits): UInt = {
-    val opc = i(15 downto 12)
-    val isSt = (opc === B"1010") ||
-      ((opc === B"1111") && !i(8) && (i(7 downto 6) === B"10"))
-    // v3.2: branches read no Rt (falls through to rtReg, unused).
-    Mux(isSt, i(11 downto 9).asUInt, i(5 downto 3).asUInt)
-  }
 
   // =========================================================================
   // Pipeline Registers — ID/EX
@@ -142,13 +122,10 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // group-B immediates: Rd read in place from [11:9] (v2.1 §4.5);
   // LDB/STB: base register in [5:3] (v2.1 §4.6); others: [8:6]/[5:3].
   private val idIsByteMem = decoder.io.isLDB || decoder.io.isSTB
-  private val idRsAddr = ((decoder.io.isBranch || decoder.io.isJMP ||
-    decoder.io.isGrpBImm) ? decoder.io.instr(11 downto 9).asBits |
-    (idIsByteMem ? decoder.io.instr(5 downto 3).asBits |
-      decoder.io.rsReg.asBits)).asUInt
-  private val idRtAddr = ((decoder.io.isST || decoder.io.isSTB) ?
-    decoder.io.rdField.asBits |
-    decoder.io.rtReg.asBits).asUInt
+  // Class→field equations live in Isa (single source of truth with the
+  // IF-stage latch); the vID-gated latch assert below guards the capture.
+  private val idRsAddr = Isa.rsAddrOf(decoder.io.instr)
+  private val idRtAddr = Isa.rtAddrOf(decoder.io.instr)
 
   regFile.io.rsAddr := rID_rsAddr
   regFile.io.rtAddr := rID_rtAddr
@@ -174,10 +151,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // cone that was the nextpnr critical path (addr decode + backpressure
   // no longer feed any clock-enable).
   private val stFired = Reg(Bool()) init False
-  // Little-endian byte-lane select (v2.1 §2.2/§5.6): zero-extend the addressed
-  // byte (addr[0] picks the upper lane), or pass the full word through.
-  private def laneSel(word: Bits, isByte: Bool, a0: Bool): Bits =
-    isByte ? (B(0, 8 bits) ## Mux(a0, word(15 downto 8), word(7 downto 0))) | word
+  // Byte-lane select shared via Isa (single source of truth).
   // Accept response when waiting (WAIT_BUS) or when req fires and response
   // arrives in the same cycle (async RAM read).  Without the second
   // condition, the combinational response from async RAM would be lost
@@ -278,11 +252,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     decoder.io.isCALL ||
     decoder.io.isCALLR ||
     decoder.io.isJMPR ||
-    (decoder.io.isBranch &&
-      ((decoder.io.brCC === B"00" && idFwdRsVal === 0) ||
-        (decoder.io.brCC === B"01" && idFwdRsVal =/= 0) ||
-        (decoder.io.brCC === B"10" && idFwdRsVal(15)) ||
-        (decoder.io.brCC === B"11" && !idFwdRsVal(15))))
+    (decoder.io.isBranch && Isa.brTaken(idFwdRsVal, decoder.io.brCC))
 
   // Pre-compute JMP/CALL target in ID to remove forwarding mux from EX
   // critical path.  Stored as rEX_jmpTarget in the ID→EX transfer.
@@ -327,7 +297,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
         ldAddr0 := rEX_effAddr(0)
         when(io.dataBus.rsp.fire) {
           // Async RAM: response available same cycle as request — skip WAIT_BUS
-          ldData := laneSel(io.dataBus.rsp.payload, rEX_byte, rEX_effAddr(0))
+          ldData := Isa.laneSel(io.dataBus.rsp.payload, rEX_byte, rEX_effAddr(0))
           ldState := LdPhase.DATA_READY
         } otherwise {
           // Sync RAM or UART: wait for response in WAIT_BUS
@@ -337,7 +307,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     }
     is(LdPhase.WAIT_BUS) {
       when(io.dataBus.rsp.fire) {
-        ldData := laneSel(io.dataBus.rsp.payload, ldIsByte, ldAddr0)
+        ldData := Isa.laneSel(io.dataBus.rsp.payload, ldIsByte, ldAddr0)
         ldState := LdPhase.DATA_READY
       }
     }
@@ -524,8 +494,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
           rID_instr := ldiHeader
           rID_pc := ldiHeaderPc
           rID_ldiData := io.instrRsp.payload
-          rID_rsAddr := rsAddrOf(ldiHeader)
-          rID_rtAddr := rtAddrOf(ldiHeader)
+          rID_rsAddr := Isa.rsAddrOf(ldiHeader)
+          rID_rtAddr := Isa.rtAddrOf(ldiHeader)
           vID := True
           ldiPending := False
           pc := pc + 2
@@ -533,8 +503,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
           rID_instr := io.instrRsp.payload
           rID_pc := pc
           rID_ldiData := 0
-          rID_rsAddr := rsAddrOf(io.instrRsp.payload)
-          rID_rtAddr := rtAddrOf(io.instrRsp.payload)
+          rID_rsAddr := Isa.rsAddrOf(io.instrRsp.payload)
+          rID_rtAddr := Isa.rtAddrOf(io.instrRsp.payload)
           vID := True
           pc := pc + 2
         }
@@ -974,11 +944,11 @@ case class PipCore() extends Component with CoreBusIoComponent {
     // byte-lane select applied for LDB (§5.6): zero-extended addressed lane.
     when(pastValid() && resetn) {
       when(past(io.dataBus.rsp.fire) && past(ldState) === LdPhase.IDLE) {
-        assert(ldData === laneSel(past(io.dataBus.rsp.payload),
+        assert(ldData === Isa.laneSel(past(io.dataBus.rsp.payload),
           past(rEX_byte), past(rEX_effAddr(0))))
       }
       when(past(io.dataBus.rsp.fire) && past(ldState) === LdPhase.WAIT_BUS) {
-        assert(ldData === laneSel(past(io.dataBus.rsp.payload), ldIsByte, ldAddr0))
+        assert(ldData === Isa.laneSel(past(io.dataBus.rsp.payload), ldIsByte, ldAddr0))
       }
     }
 

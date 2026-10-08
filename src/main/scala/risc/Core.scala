@@ -72,9 +72,9 @@ case class Core() extends Component with CoreBusIoComponent {
   // === Decoder ===
   decoder.io.instr := instr
 
-  // === Sign/zero extension (ISA v2.1 §4.5) ===
-  private val sextVal = decoder.io.imm6.asSInt.resize(16).asBits
-  private val zextVal = B(0, 10 bits) ## decoder.io.imm6   // group-B immediates
+  // === Sign/zero extension (ISA v2.1 §4.5, shared via Isa) ===
+  private val sextVal = Isa.sext6(decoder.io.imm6)
+  private val zextVal = Isa.zext6(decoder.io.imm6)   // group-B immediates
 
   // === v2.1: byte-memory class (LDB/STB) ===
   private val isByteMem = decoder.io.isLDB || decoder.io.isSTB
@@ -100,19 +100,9 @@ case class Core() extends Component with CoreBusIoComponent {
     (regFile.io.rsVal.asUInt + offScaled).asBits.resized)
 
   // === Register file ===
-  // v3.2 BR:                  single Rs in instr[11:9], no Rt (cond in [8:7])
-  // JMP:                      Rs in instr[11:9]                       (ISA §3.5)
-  // ST/STB:                   store source in rdField instr[11:9]     (ISA §3.3)
-  // Group-B immediates:       Rd read in place from instr[11:9]       (v2.1 §4.5)
-  // LDB/STB:                  base Rs in instr[5:3]                   (v2.1 §4.6)
-  // All others:               Rs in instr[8:6],  Rt in instr[5:3]
-  private val rsAddr = ((decoder.io.isBranch || decoder.io.isJMP ||
-    decoder.io.isGrpBImm) ? decoder.io.instr(11 downto 9).asBits |
-    (isByteMem ? decoder.io.instr(5 downto 3).asBits |
-      decoder.io.rsReg.asBits)).asUInt
-  private val rtAddr = ((decoder.io.isST || decoder.io.isSTB) ?
-    decoder.io.rdField.asBits |
-    decoder.io.rtReg.asBits).asUInt
+  // Port addresses via Isa (single source of truth with PipCore/Decoder).
+  private val rsAddr = Isa.rsAddrOf(decoder.io.instr)
+  private val rtAddr = Isa.rtAddrOf(decoder.io.instr)
 
   regFile.io.rsAddr := rsAddr
   regFile.io.rtAddr := rtAddr
@@ -152,12 +142,9 @@ case class Core() extends Component with CoreBusIoComponent {
   private val jmpOff12 = decoder.io.instr(11 downto 0).asSInt.resize(16).asBits
   private val jmpShifted = jmpOff12(14 downto 0) ## B"0"
 
-  // === Branch condition evaluation (v3.2: single Rs vs 0 / sign bit) ===
-  private val brTaken = decoder.io.isBranch && (
-    (decoder.io.brCC === B"00" && regFile.io.rsVal === 0) ||
-    (decoder.io.brCC === B"01" && regFile.io.rsVal =/= 0) ||
-    (decoder.io.brCC === B"10" && regFile.io.rsVal(15)) ||
-    (decoder.io.brCC === B"11" && !regFile.io.rsVal(15)))
+  // === Branch condition evaluation (v3.2, shared via Isa) ===
+  private val brTaken = decoder.io.isBranch &&
+    Isa.brTaken(regFile.io.rsVal, decoder.io.brCC)
 
   // === ST data (from rdField via rtAddr override) ===
   private val stVal = regFile.io.rtVal

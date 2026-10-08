@@ -119,17 +119,18 @@ v3 ISA timing-neutral). PHASE 1 CLOSED.
 
 ---
 
-## Phase 2 — Maintainability (after ISA is stable)
+## Phase 2 — Maintainability (after ISA is stable) [IN PROGRESS]
 
-1. **Shared ISA helpers** (`risc.IsaUtils`): sext/zext, `laneSel`,
-   rs/rt-addr mux, `Opcodes`/`CmdCodes` enums. Delete `rsAddrOf/rtAddrOf`
-   (`PipCore.scala:58-76`), merge `Core.scala:100-114` /
-   `PipCore.scala:144-152` / `Decoder.scala` field equations into one
-   source; assembler/compiler import the same table (single source of
-   truth with `asm.py`/`cc.py`).
+1. **Shared ISA helpers** (`risc.Isa`, DONE): `rsAddrOf`/`rtAddrOf`,
+   `brTaken`, `sext6`/`zext6`, `laneSel` in one object; `PipCore`
+   private copies + `Core` anonymous muxes deleted. `Decoder` keeps raw
+   field extraction (correct split: classes vs raw fields). PipCore
+   formal latch asserts kept as second net (they now verify the move was
+   verbatim). Gate: `sbt test` 35/35 ✓, 50/50 both emus ✓, zero
+   `examples/` diff (hex-identical) ✓.
 2. **Pipeline bundles**: `EX_Reg`/`ID_Reg` structs replace 12 loose
-   `rEX_*` regs (`PipCore.scala:81-109`); `InstrType`/`LdPhase` move to
-   `Types.scala`. Flush/stall/halt touch one object.
+   `rEX_*` regs; `InstrType`/`LdPhase` move to `Types.scala`.
+   Flush/stall/halt touch one object.
 3. **Explicit next-state**: replace source-order-dependent
    EX→WB-before-ID→EX (`PipCore.scala:583`) + `rWbHasExRes`/`stFired`
    feedback protocols with `next_*` wires + single register assignment.
@@ -144,7 +145,7 @@ v3 ISA timing-neutral). PHASE 1 CLOSED.
    per-phase status entries.
 
 Phase-2 exit gate: zero duplicated decode equations (grep), no behavior
-change (`test-programs-all` 49/49 byte-identical `.hex` before/after).
+change (`test-programs-all` 50/50 byte-identical `.hex` before/after).
 
 ---
 
