@@ -263,6 +263,34 @@
       (BMC 30 incl. the new `stFired` set/clear and
       `rEX_rsAddr`/`rEX_rtAddr`/`rEX_immEn` equivalence asserts).
 
+23. **ISA coverage audit + far-branch relaxation fixes** (`asm.py`,
+    `run_tests.py`, `isa_coverage.py`, `examples/pseudo_test.asm`):
+    - Static coverage audit of every test executed by
+      `make test-programs-all` (asm sources walked through
+      `asm.expand()`, tool committed as `isa_coverage.py`): all 29
+      hardware instructions were covered (LDI8 only via `LDI`
+      auto-narrowing), but 12 pseudo-ops — NEG NOT CLR LSL LSR ASR B
+      BGT BLE BLTU BGEU BLEU — appeared in no test. New
+      `examples/pseudo_test.asm` covers them plus an explicit `LDI8`
+      and far-branch relaxation in both directions (taken and
+      not-taken, incl. equal operands); R1 = 0x2A.
+    - Bug 1 (test-caught): far `BLT`/`BGT` (target beyond ±32 words)
+      inverted via a single swapped `BLT`, which encodes `rs > rt`
+      where the inverse needs `rs >= rt` — with equal operands the
+      relaxed branch fell into `LDI R4,#label; JMP R4` and jumped
+      instead of falling through. Fix: relaxed `BLT` now emits
+      `BEQ rs,rt,+4` + swapped `BLT rt,rs,+3` (5 words;
+      `instr_size` returns 10 for relaxed BLT/BGT).
+    - Bug 2 (test-caught): `compute_relaxed` only inspected
+      `ops[0]`, so BRANCH2 pseudos (BGE/BLE/BLTU/BGEU/BLEU →
+      SLT+branch) were never marked relaxed — far targets got a
+      silently truncated 6-bit offset (wild jump). Fix: check every
+      emitted branch at its own address; relaxed BRANCH2 sizes
+      4 → 10 bytes.
+    - Verified: `make test-programs-all` **49/49** on both emulators
+      (all 49 reassembled with the fixed assembler); no Scala/RTL
+      changes → formal unaffected.
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully
@@ -283,7 +311,7 @@
 
 - **PipSoc Emulator**: ✓ Compiles and runs (pipsoc-emu), separate emulator using PipSoc Verilog
 - **PipCore Formal Verification**: ✓ PipCore passes BMC(30)
-- **C + asm tests on both cores**: **48/48 pass** (41 C tests + 7 v2.1 ISA asm tests, on both PipSoc and multi-cycle core)
+- **C + asm tests on both cores**: **49/49 pass** (41 C tests + 8 asm tests, on both PipSoc and multi-cycle core); `python3 isa_coverage.py` audits instruction coverage
   - Pipeline patterns: `ld_use_all` (LD→ADD/SUB/AND/OR), `ld_st_addr` (LDI address for ST),
     `forward_chain` (6-op ALU forwarding), `ldi_burst` (back-to-back LDI),
     `br_chain` (BEQ/BNE/BLT), `ld_ld_ld` (3 LDs), `st_ld_test` (ST→LD aliasing)
@@ -321,7 +349,7 @@ still NOP — see `ISA-2.1.md` §11):
 | ANDI/ORI/SLLI/SRLI/SRAI | group B (JMP), cf≥011, in-place | `imm_test.asm` |
 | CALL / HALT | group B, cf=001 / 010 | `call_test.asm`, `ldi8_rsvd_test.asm` |
 | LDI8 / LDB / STB | group F (LDI), b8 / mf=01/10 | `byte_test.asm`, `ldi8_rsvd_test.asm` |
-| BGE/BLE/BLTU/BGEU/BLEU/B/BGT/MOV/… | assembler pseudo-ops (§7.2) | `bge_test.asm` |
+| BGE/BLE/BLTU/BGEU/BLEU/B/BGT/MOV/… | assembler pseudo-ops (§7.2) | `bge_test.asm`, `pseudo_test.asm` |
 
 ### FPGA Flow (F4PGA for Basys3 / xc7a35tcpg236-1)
 

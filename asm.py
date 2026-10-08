@@ -169,9 +169,13 @@ def instr_size(toks, relaxed, narrow, jmp_narrow, line_no):
     if m == "JMP" and len(args) >= 1 and args[0] not in REGS:
         return 4 if line_no in jmp_narrow else 6
     if m in BRANCH1 and line_no in relaxed:
-        return 8  # inverted condition + LDI/JMP (4 words)
+        # Inverted condition + LDI/JMP (4 words).  BLT (and BGT, which
+        # expands to a swapped BLT) needs an extra BEQ for the equality
+        # case -> 5 words.
+        return 10 if m in ("BLT", "BGT") else 8
     if m in BRANCH2:
-        return 4  # SLT/SLTU tmp + branch
+        # SLT/SLTU tmp + branch; a relaxed line escapes via LDI/JMP.
+        return 10 if line_no in relaxed else 4
     if m in GRPBF:
         # 3-op form with Rs != Rd needs the copy instruction
         if len(args) >= 3 and args[1] in REGS and args[1] != args[0]:
@@ -214,13 +218,21 @@ def compute_relaxed(lines, relaxed, narrow, jmp_narrow):
                 m = toks[0]
                 args = get_args(toks)
                 ops = expand(m, args, 4)
-                mn, ar = ops[0]
-                if mn in ("BEQ", "BNE", "BLT") and len(ar) >= 3 and ar[2] in labels:
-                    off = (labels[ar[2]] - addr - 2) // 2
-                    if off < -32 or off > 31:
-                        if i not in relaxed:
-                            relaxed.add(i)
-                            changed = True
+                # Check EVERY emitted branch at its own address: BRANCH2
+                # pseudos emit SLT/SLTU first, so their branch sits 2 bytes
+                # later.  (Previously only ops[0] was inspected, which left
+                # far BGE/BLE/BLTU/BGEU/BLEU unrelaxed -> their branch
+                # offset was silently truncated to 6 bits.)
+                a = addr
+                for mn, ar in ops:
+                    if mn in ("BEQ", "BNE", "BLT") and len(ar) >= 3 and ar[2] in labels:
+                        off = (labels[ar[2]] - a - 2) // 2
+                        if off < -32 or off > 31:
+                            if i not in relaxed:
+                                relaxed.add(i)
+                                changed = True
+                            break
+                    a += 2
             addr += sz
         if not changed:
             return relaxed
@@ -301,14 +313,24 @@ def emit(output, addr, m, args, labels, relaxed, narrow, jmp_narrow, line_no):
             off = parse_num(args[2])
         if line_no in relaxed:
             # Inverted condition jumps over LDI R4, #label / JMP R4.
-            # BEQ->BNE, BNE->BEQ, BLT->BGE (BLT with swapped registers).
+            # BEQ->BNE and BNE->BEQ are exact inverses.  BLT (and BGT,
+            # which expands to a swapped BLT) cannot be inverted by
+            # swapping operands alone: NOT(rs < rt) = rs >= rt, but the
+            # swapped BLT encodes only rs > rt — with EQUAL operands it
+            # fell into the LDI/JMP and jumped instead of falling
+            # through.  Skip on equality with an extra BEQ (5 words).
+            target = resolve(args[2], labels)
+            if op == 0xE:
+                output.append((addr, enc_branch(0xC, rs, rt, 4)))
+                output.append((addr + 2, enc_branch(0xE, rt, rs, 3)))
+                output.append((addr + 4, ((0xF << 12) | (4 << 9)) & 0xFFFF))
+                output.append((addr + 6, target & 0xFFFF))
+                output.append((addr + 8, (0xB << 12) | (4 << 9)))
+                return addr + 10
             if op == 0xC:
                 opp = enc_branch(0xD, rs, rt, 3)
-            elif op == 0xD:
-                opp = enc_branch(0xC, rs, rt, 3)
             else:
-                opp = enc_branch(0xE, rt, rs, 3)
-            target = resolve(args[2], labels)
+                opp = enc_branch(0xC, rs, rt, 3)
             output.append((addr, opp))
             output.append((addr + 2, ((0xF << 12) | (4 << 9)) & 0xFFFF))
             output.append((addr + 4, target & 0xFFFF))

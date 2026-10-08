@@ -58,6 +58,10 @@ ASM_TESTS = [
     ('byte_test.asm',      0x112,  4000),   # STB/LDB lanes + zero-extend
     ('ldi8_rsvd_test.asm', 0x1FF,  2000),   # LDI auto-narrow, reserved=NOP, HALT
     ('bge_test.asm',       0x01,   2000),   # BGE pseudo branches on equality
+    ('pseudo_test.asm',    0x2A,   3000),   # NEG/NOT/CLR/LSL/LSR/ASR/B/BGT/
+                                             # BLE/BLTU/BGEU/BLEU + LDI8 +
+                                             # far-branch relaxation (both
+                                             # directions, equal operands)
 ]
 
 def compile_c(c_file):
