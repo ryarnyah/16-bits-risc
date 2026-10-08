@@ -276,7 +276,7 @@ public:
             auto rWB_result = r->PipSoc__DOT__core__DOT__rWB_result;
             auto stallID = r->PipSoc__DOT__core__DOT__stallID;
             auto ldRd = r->PipSoc__DOT__core__DOT__ldRd;
-            auto aluRes_ = r->PipSoc__DOT__core__DOT__alu_1_io_result;
+            auto aluRes_ = r->PipSoc__DOT__core__DOT__exResult;
             auto exBrTaken_ = r->PipSoc__DOT__core__DOT__rEX_brTaken;
             auto r2val = r->PipSoc__DOT__core__DOT__regFile_1__DOT__regs_2;
             auto r6val = r->PipSoc__DOT__core__DOT__regFile_1__DOT__regs_6;
@@ -509,7 +509,7 @@ int main(int argc, char** argv) {
                 auto exRtAddr = r->PipSoc__DOT__core__DOT__exRtAddr;
                 auto rWB_rd = r->PipSoc__DOT__core__DOT__rWB_rd;
                 auto rWB_hasRd = r->PipSoc__DOT__core__DOT__rWB_hasRd;
-                auto aluRes = r->PipSoc__DOT__core__DOT__alu_1_io_result;
+                auto aluRes = r->PipSoc__DOT__core__DOT__exResult;
                 auto exBrTaken = r->PipSoc__DOT__core__DOT__rEX_brTaken;
                 auto rWB_result = r->PipSoc__DOT__core__DOT__rWB_result;
                 auto ldData = r->PipSoc__DOT__core__DOT__ldData;

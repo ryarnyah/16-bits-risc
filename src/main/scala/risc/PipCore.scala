@@ -137,8 +137,25 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // because ldPending is only set one cycle after req fires.
   io.dataBus.rsp.ready := ldPending || (rEX_type === InstrType.LD && ldState === LdPhase.IDLE && io.dataBus.req.fire)
 
-  // Forwarding from WB stage (used by both ID address and EX ALU forwarding)
-  private val fwdFromWb = vWB && rWB_hasRd && rWB_rd =/= 0
+  // Forwarding from WB stage (used by both ID address and EX ALU forwarding).
+  //
+  // vWB/rWB_hasRd/rWB_rd are written ONLY by the EX→WB block below (default
+  // vWB := False, set True inside the exWbFired condition) plus the debug
+  // flush (flsPipeline forces vWB := False).  That combinational term
+  //   vWB && rWB_hasRd && rWB_rd =/= 0
+  // sits on every forwarding path and cost 2 LUT levels on the FPGA
+  // critical path, so it is mirrored into a register here — evaluated from
+  // the same source values, one cycle earlier, which is exactly what the
+  // register update will hold.
+  private val exWbFired = (rEX_type =/= InstrType.EMPTY && rEX_type =/= InstrType.LD &&
+    rEX_type =/= InstrType.ST &&
+    (!rEX_brTaken || rEX_type === InstrType.CALL))
+  private val dbgFlush = busIf.io.cmdStrb &&
+    ((busIf.io.cmdWord(31 downto 24) === 0x03) ||
+      (busIf.io.cmdWord(31 downto 24) === 0x04) ||
+      (busIf.io.cmdWord(31 downto 24) === 0x05))
+  private val fwdFromWb = RegNext(
+    exWbFired && rEX_hasRd && rEX_rd =/= 0 && !dbgFlush) init False
 
   // =========================================================================
   // ID-stage Address Computations
@@ -150,18 +167,29 @@ case class PipCore() extends Component with CoreBusIoComponent {
     (B(0, 10 bits) ## decoder.io.imm6) | idSext
   // v2.1 §4.6: byte memory effective address = Rs + zext(off3) (0..7).
   private val idOffZext3 = B(0, 13 bits) ## decoder.io.instr(2 downto 0)
-  // Forwarding for address computation: LD/ST use rs+imm6, but rs may be
-  // updated by the instruction currently in EX (ALU/LDI) or WB/LD.
+  // Forwarding priority for register reads in ID: EX (LDI only), LD data,
+  // WB, regfile — pre-computed selects feeding one nested Mux per port.
   //
-  // Restructured from 4-level nested Mux to 2-level: EX result (ALU/LDI
-  // merged via inner mux) has highest priority, then LD, then WB, then
-  // regfile.  Pre-computing the common EX condition shortens the critical
-  // path by removing redundant comparisons from each nesting level.
-  private val exWritesRd = (rEX_type === InstrType.ALU || rEX_type === InstrType.LDI) &&
+  // Timing (FPGA, 100 MHz target): the ALU result is deliberately NOT
+  // forwarded into ID anymore.  The old path
+  //   rWB_rd → exFwd compare → alu.io.result → idFwdExData → idFwdRsVal
+  //     → idEffAddr adder → rEX_effAddr
+  // was ~15 logic levels and dominated the nextpnr critical path (69.96 MHz
+  // at 14.3 ns).  Only the LDI value remains, and it is the rEX_ldiData
+  // REGISTER — zero logic depth.
+  //
+  // Consumers that need an ALU/CALL result *in this cycle* in ID — the
+  // effective address (rs), the branch condition (rs, rt) and the JMP/CALL
+  // target — are stalled one cycle by exIdFwdHazard until EX→WB has copied
+  // the result into rWB, which idFwd*WbSel then forwards from a register.
+  // All other consumers just latch the operand here; EX→WB always fires for
+  // the predecessor, so exFwdRsVal/exFwdRtVal re-forward it from rWB_result
+  // while they are themselves in EX.
+  private val exLdiWritesRd = (rEX_type === InstrType.LDI) &&
     rEX_hasRd && rEX_rd =/= 0
-  private val idFwdRsExSel = exWritesRd && rEX_rd === idRsAddr
-  private val idFwdRtExSel = exWritesRd && rEX_rd === idRtAddr
-  private val idFwdExData = Mux(rEX_type === InstrType.ALU, alu.io.result, rEX_ldiData)
+  private val idFwdRsExSel = exLdiWritesRd && rEX_rd === idRsAddr
+  private val idFwdRtExSel = exLdiWritesRd && rEX_rd === idRtAddr
+  private val idFwdExData = rEX_ldiData
   private val idFwdRsLdSel = ldRspPending && ldRd === idRsAddr && ldRd =/= 0
   private val idFwdRtLdSel = ldRspPending && ldRd === idRtAddr && ldRd =/= 0
   private val idFwdRsWbSel = fwdFromWb && rWB_rd === idRsAddr
@@ -182,10 +210,12 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val idBrTarget = (rID_pc.asSInt + 2 + idBrShifted.asSInt).asBits.resized
 
   // Pre-compute branch condition in ID to shorten EX critical path.
-  // Uses idFwdRsVal/idFwdRtVal which include all forwarding (ALU, LDI,
-  // LD data in DATA_READY, WB).  loadUseHazard stalls the branch in ID
-  // if its operands depend on a pending LD, guaranteeing data settles
-  // before EX.  Stored as rEX_brTaken in the ID→EX transfer.
+  // Uses idFwdRsVal/idFwdRtVal, whose sources are all REGISTERS by now
+  // (LDI result, LD data in DATA_READY, WB result, regfile).  Two stalls
+  // guarantee the operands are settled before ID→EX fires:
+  // loadUseHazard for a pending LD and exIdFwdHazard for an ALU/CALL
+  // result still sitting in EX.  Stored as rEX_brTaken in the ID→EX
+  // transfer.
   // v2.1 §5.4: CALL is taken unconditionally (flush + redirect like JMP).
   private val idBrTaken =
     decoder.io.isJMP ||
@@ -297,24 +327,74 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // and eliminates the penalty entirely for not-taken branches.
   //private val stallBrId = vID && (decoder.io.isBranch || decoder.io.isJMP)
   private val stallLdiId = vID && decoder.io.isLDI
+
+  // =========================================================================
+  // EX→ID result hazard (timing-critical reads only)
+  // =========================================================================
+  // ID uses these register reads COMBINATIONALLY in the same cycle and then
+  // latches the result into EX, where it can no longer be re-forwarded:
+  //   - effective address of LD/ST/LDB/STB   (rs)
+  //   - branch condition BEQ/BNE/BLT         (rs and rt)
+  //   - JMP / CALL target                    (rs / rt)
+  // An ALU/CALL result sitting in EX is not forwarded into ID (see
+  // idFwdExData — that path was the FPGA critical path), so stall ID for one
+  // cycle until EX→WB has copied the result into rWB, where idFwd*WbSel
+  // forwards it from a register.  LDI needs no stall: its value is already
+  // a register (rEX_ldiData) and is forwarded above; LD producers are
+  // covered by loadUseHazard.
+  //
+  // The stall is self-clearing and cannot deadlock: holding ID prevents
+  // ID→EX, which retains the EX instruction, whose EX→WB transfer re-fires
+  // every cycle (non-LD/ST, no flush) — so rWbHasExRes goes high exactly
+  // one cycle later and clears the hazard.
+  private val idIsMemOp = decoder.io.isLD || decoder.io.isLDB ||
+    decoder.io.isST || decoder.io.isSTB
+  private val idUsesRsInId = vID && (idIsMemOp || decoder.io.isBranch ||
+    decoder.io.isJMP)
+  private val idUsesRtInId = vID && (decoder.io.isBranch || decoder.io.isCALL)
+  private val exIdFwdHazard = ((rEX_type === InstrType.ALU ||
+    rEX_type === InstrType.CALL) && rEX_hasRd && rEX_rd =/= 0) &&
+    ((idUsesRsInId && rEX_rd === idRsAddr) ||
+      (idUsesRtInId && rEX_rd === idRtAddr))
+  // "rWB currently holds the result of the instruction that is still sitting
+  // in EX" (EX retained across the last edge while EX→WB re-wrote its own
+  // result).  Declared here, assigned right after stallID: its D input
+  // depends on stallID (the retention condition), which in turn needs this
+  // register's Q — a register feedback loop, no combinational loop.
+  private val rWbHasExRes = Reg(Bool()) init False
+
   private val stallID = loadUseHazard || ldWaitStall || ldActiveStall ||
-    ldIssueStall || stStall
+    ldIssueStall || stStall || (exIdFwdHazard && !rWbHasExRes)
   private val stallIF = stallID || stallLdiId
+
+  // EX retained its instruction iff the ID→EX block did not run (stallID or
+  // halted) and nothing cleared it (exBrTaken, debug flush).  hasRd/rd/=0
+  // are included so that rWbHasExRes ⇒ fwdFromWb: whenever the flag is set,
+  // idFwd*WbSel is guaranteed to select rWB_result — which is what lets the
+  // hazard above clear.
+  rWbHasExRes := exWbFired && rEX_hasRd && rEX_rd =/= 0 &&
+    !rEX_brTaken && (stallID || halted) && !dbgFlush
 
   // =========================================================================
   // Forwarding and Branch Detection
   // =========================================================================
 
   // Self-forwarding guard: when the same instruction is stalled in EX,
-  // EX→WB keeps writing its result to rWB each cycle.  Without this guard,
-  // the WB→EX forwarding feeds the ALU input and creates an arithmetic
-  // loop (e.g. ADDI R7,R7,#2 would add 2 every stall cycle).
-  private val exFwdRsVal = Mux(fwdFromWb && rWB_rd === exRsAddr && !(rEX_hasRd && rWB_rd === rEX_rd),
+  // EX→WB keeps writing its result to rWB each cycle.  Forwarding that back
+  // into the ALU input creates an arithmetic loop (e.g. ADDI R7,R7,#2 would
+  // add 2 every stall cycle).  rWbHasExRes is the precise form of the old
+  //  !(rEX_hasRd && rWB_rd === rEX_rd)  check: rWB can only ever hold the
+  // current EX instruction's own result (EX retained while EX→WB re-fired)
+  // or its direct predecessor.  Blocking only the first case is required —
+  // since ID no longer forwards the EX ALU result, a *different* instruction
+  // with the same rd in WB must be forwarded (the ID-latched operand may be
+  // stale in exactly that case).
+  private val exFwdRsVal = Mux(fwdFromWb && rWB_rd === exRsAddr && !rWbHasExRes,
     rWB_result,
     Mux(ldRspPending && ldRd === exRsAddr && ldRd =/= 0,
       ldData,
       rEX_rsVal))
-  private val exFwdRtVal = Mux(fwdFromWb && rWB_rd === exRtAddr && !(rEX_hasRd && rWB_rd === rEX_rd),
+  private val exFwdRtVal = Mux(fwdFromWb && rWB_rd === exRtAddr && !rWbHasExRes,
     rWB_result,
     Mux(ldRspPending && ldRd === exRtAddr && ldRd =/= 0,
       ldData,
@@ -324,8 +404,9 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // This removes the 16-bit comparator and forwarding mux from the EX
   // critical path.  The result is identical to re-computing from
   // exFwdRsVal/exFwdRtVal because loadUseHazard stalls the branch in ID
-  // if its operands depend on a pending LD, and all other forwarding
-  // sources (ALU, LDI, WB) are settled before ID→EX fires.
+  // if its operands depend on a pending LD, exIdFwdHazard stalls it for an
+  // ALU/CALL result still in EX, and the remaining sources (LDI register,
+  // WB result, regfile) are settled before ID→EX fires.
   private val exBrTaken = rEX_brTaken
 
   // =========================================================================
@@ -442,9 +523,24 @@ case class PipCore() extends Component with CoreBusIoComponent {
   when(rEX_type =/= InstrType.EMPTY && rEX_type =/= InstrType.LD &&
     rEX_type =/= InstrType.ST &&
     (!exBrTaken || rEX_type === InstrType.CALL)) {
-    rWB_rd := rEX_rd
-    rWB_hasRd := rEX_hasRd
-    rWB_result := exResult
+    // Commit this instruction's result — UNLESS rWB already holds it, i.e.
+    // EX is on a retained (stalled) cycle and this is a re-computation:
+    //   rWbHasExRes ⇒ rWB_result = result of the FIRST cycle in EX.
+    // Retention must not overwrite it.  The ID operand latch can be stale
+    // for an ALU instruction whose predecessor writes its source (the EX
+    // ALU result is no longer forwarded into ID — timing), so only the
+    // first cycle in EX computes a correct exResult: EX forwarding feeds // the correct operand there and is blocked afterwards by the
+    // rWbHasExRes self-forward guard.  Without this hold, the recomputed
+    // garbage from the stale latch wins (ADDI R7,R7,#2 committed 1ff4
+    // instead of 1ff8 while held by ldActiveStall, corrupting R7).
+    // rWB_rd/rWB_hasRd are gated too — they already hold these exact
+    // values during retention (same instruction), so the gate is a no-op
+    // for them and keeps the whole commit atomic.
+    when(!rWbHasExRes) {
+      rWB_rd := rEX_rd
+      rWB_hasRd := rEX_hasRd
+      rWB_result := exResult
+    }
     vWB := True
   }
 

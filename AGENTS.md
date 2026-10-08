@@ -181,6 +181,44 @@
     SpinalHDL emit `dataRam_symbol0`/`dataRam_symbol1` (2×8-bit lanes);
     `main_pipsoc.cpp` `readDataMem` reads both lanes.
 
+21. **F4PGA `$buf` no-BEL fix + PipCore timing redesign** (open: 85.5 MHz
+    of 100 MHz target):
+    - Root cause of `nextpnr: no BELs remaining for $buf`: the F4PGA flow
+      generated `target/gen/PipSoc.sv` **without** a hex path → `instrRom`
+      uninitialized → Yosys don't-care collapse (hollow netlist,
+      `core.rID_pc[15:2]` undriven → `$buf` with 14× `z` inputs).
+      Fix: `object Soc`/`object PipSoc` take `args(1)` = target directory;
+      Makefile rule builds `f4pga/build/{Soc,PipSoc}.sv` from
+      `F4PGA_PROG ?= examples/fib_uart.hex` (baked in), keeping
+      `target/gen/*.sv` uninitialized for the emulator (`loadProgram()`
+      pokes `instrRom` directly).
+    - PipCore FPGA critical path was 15 levels (69.96 MHz):
+      `rWB_rd → exFwd compare → ALU → idFwdExData → idFwdRsVal →
+      idEffAddr → rEX_effAddr`. Redesign (all in `PipCore.scala`):
+      1. EX ALU result no longer forwarded into ID (`idFwdExData =
+         rEX_ldiData`, register only — LDI keeps its ID forward).
+      2. `exIdFwdHazard`: ID reads used *combinationally* in ID (mem
+         address rs, branch rs/rt, JMP rs / CALL rt) stall 1 cycle when
+         EX holds an ALU/CALL result for that reg, until it reaches WB
+         (`rWbHasExRes` clears the stall; self-clearing, no deadlock).
+      3. `fwdFromWb` registered (mirrors `vWB && rWB_hasRd && rWB_rd=/=0`,
+         incl. `dbgFlush` 0x03/04/05 → exact equivalence), saves 2 LUT
+         levels on every forwarding path.
+      4. Precise self-forward guard `!rWbHasExRes` replaces
+         `!(rEX_hasRd && rWB_rd === rEX_rd)` (the old rd-based guard would
+         wrongly block a *different* producer with the same rd, now that
+         ID no longer latches the EX ALU result).
+      5. EX→WB **holds** `rWB_result` while EX is retained
+         (`rWbHasExRes`): the ID operand latch may be stale for an ALU
+         whose predecessor writes its source, so only the first cycle in
+         EX computes a correct `exResult` (test-caught: retained
+         `ADDI R7,R7,#2` re-committed `1ff4` over `1ff8`).
+    - `main_pipsoc.cpp` debug prints use `exResult` (Verilator no longer
+      exposes `alu_1_io_result` after it left the ID path).
+    - Result: PnR completes, 69.96 → **85.52 MHz** (was FAIL earlier in
+      placement); critical path now `dataWordAddr[7] → … → FF CE`
+      (2.3 ns logic + 9.4 ns routing).
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully
@@ -256,6 +294,10 @@ still NOP — see `ISA-2.1.md` §11):
   - nextpnr-xilinx PnR with basys3.xdc constraints
   - FASM → frames (minimal Python parser + prjxray fasm_assembler)
   - Frames → .bit (xc7frames2bit), valid Xilinx sync word `0009 0ff0...`
+- [x] `make f4pga-pipsoc` (PipSoc): synth + PnR complete with
+  `F4PGA_PROG` baked into `f4pga/build/PipSoc.sv` (fixes `$buf` no-BEL);
+  timing **85.52 MHz FAIL at 100 MHz** — optimization in progress
+  (see fix #21)
 - [ ] `f4pga_program` needs a Basys3 board connected via USB
 
 ### GCC 15 Compatibility

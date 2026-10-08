@@ -189,6 +189,13 @@ f4pga_tool = $(or \
 	$(shell which $(1) 2>/dev/null))
 
 F4PGA_DIR     := f4pga/build
+# Program baked into instrRom for FPGA bitstreams.  The FPGA flow generates
+# its own SystemVerilog copy in $(F4PGA_DIR) (2nd arg of risc.Soc/risc.PipSoc)
+# so target/gen/*.sv stays uninitialized for the emulator, which pokes
+# instrRom itself.  An uninitialized ROM makes Yosys propagate don't-cares
+# and collapse the whole design (hollow netlist → nextpnr 'no BELs remaining
+# for $buf' errors).
+F4PGA_PROG   ?= examples/fib_uart.hex
 F4PGA_JSON    := $(F4PGA_DIR)/Soc.json
 F4PGA_FASM    := $(F4PGA_DIR)/Soc.fasm
 F4PGA_BIT     := $(F4PGA_DIR)/Soc.bit
@@ -389,7 +396,12 @@ $(FASM_STUB): $(PRJXRAY_SRC)
 f4pga: $(F4PGA_BIT)
 	@echo "[F4PGA] FPGA flow complete. Use 'make f4pga_program' to program."
 
-$(F4PGA_JSON): $(TARGET_DIR)/Soc.sv
+# FPGA copy of the SoC with $(F4PGA_PROG) baked into instrRom — see
+# F4PGA_PROG above for why this must be a separate file.
+$(F4PGA_DIR)/Soc.sv: $(shell find src/main -name '*.scala') $(F4PGA_PROG)
+	$(SBT) "runMain risc.Soc $(F4PGA_PROG) $(F4PGA_DIR)"
+
+$(F4PGA_JSON): $(F4PGA_DIR)/Soc.sv
 	mkdir -p $(F4PGA_DIR)
 	@echo "[F4PGA] Synthesizing $(F4PGA_DEVICE):$(F4PGA_PART) top=Soc ..."
 	$(if $(call f4pga_tool,yosys), \
@@ -441,7 +453,12 @@ F4PGA_PIPSOC_XDC := f4pga/basys3_pipsoc.xdc
 f4pga-pipsoc: $(F4PGA_DIR)/PipSoc.bit
 	@echo "[F4PGA] PipSoc FPGA flow complete. Use 'make f4pga_program_pipsoc' to program."
 
-$(F4PGA_DIR)/PipSoc.json: $(TARGET_DIR)/PipSoc.sv
+# FPGA copy of PipSoc with $(F4PGA_PROG) baked into instrRom — see
+# F4PGA_PROG above for why this must be a separate file.
+$(F4PGA_DIR)/PipSoc.sv: $(shell find src/main -name '*.scala') $(F4PGA_PROG)
+	$(SBT) "runMain risc.PipSoc $(F4PGA_PROG) $(F4PGA_DIR)"
+
+$(F4PGA_DIR)/PipSoc.json: $(F4PGA_DIR)/PipSoc.sv
 	mkdir -p $(F4PGA_DIR)
 	@echo "[F4PGA] Synthesizing $(F4PGA_DEVICE):$(F4PGA_PART) top=PipSoc ..."
 	$(if $(call f4pga_tool,yosys), \

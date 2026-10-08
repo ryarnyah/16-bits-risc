@@ -202,8 +202,12 @@ private val core = PipCore()
 
 object PipSoc extends App {
   val hexPath = if (args.length > 0) args(0) else ""
+  // Optional 2nd arg: output directory.  The FPGA flow generates a separate
+  // copy with a program baked into instrRom (target/gen/PipSoc.sv must stay
+  // uninitialized — the emulator pokes instrRom directly after elaboration).
+  val outDir = if (args.length > 1) args(1) else "target/gen"
   SpinalConfig(
-    targetDirectory = "target/gen",
+    targetDirectory = outDir,
     mergeAsyncProcess = true,
     mergeSyncProcess = true,
     genLineComments = true,
