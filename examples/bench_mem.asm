@@ -45,9 +45,8 @@ main:
     LDI R1, #0x0064
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl4
-    JMP .fe3
-.cl4:
+    SLT R3, R2, R1
+    BR Z, R3, .fe3
     LDI R1, #-200
     ADD R1, R1, R6
     ST R1, [R7]
@@ -74,11 +73,11 @@ main:
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mul16_ret5
+    LDI R5, #.mul16_ret4
     LDI R4, #__mul16
-    LD R1, [R7 +2]
+    LD R1, [R7 +1]
     JMP R4
-.mul16_ret5:
+.mul16_ret4:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
     LD R5, [R7]
@@ -107,7 +106,7 @@ main:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R2, [R1 + 0]
-.fc6:
+.fc5:
     LDI R1, #-202
     ADD R1, R1, R6
     LD R1, [R1 + 0]
@@ -116,9 +115,8 @@ main:
     LDI R1, #0x0064
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl9
-    JMP .fe8
-.cl9:
+    SLT R3, R2, R1
+    BR Z, R3, .fe7
     LDI R1, #-204
     ADD R1, R1, R6
     LD R1, [R1 + 0]
@@ -147,7 +145,7 @@ main:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R2, [R1 + 0]
-.fi7:
+.fi6:
     LDI R1, #-202
     ADD R1, R1, R6
     LD R1, [R1 + 0]
@@ -159,8 +157,8 @@ main:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R2, [R1 + 0]
-    JMP .fc6
-.fe8:
+    JMP .fc5
+.fe7:
     LDI R1, #-204
     ADD R1, R1, R6
     LD R1, [R1 + 0]
@@ -184,14 +182,14 @@ __mul16:
 __mul_lp:
     ADDI R6, R0, #1
     AND R6, R1, R6
-    BEQ R6, R0, __mul_sk
+    BR Z, R6, __mul_sk
     ADD R3, R3, R2
 __mul_sk:
     ADDI R6, R0, #1
     SLL R2, R2, R6
     SRL R1, R1, R6
     ADDI R4, R4, #-1
-    BNE R4, R0, __mul_lp
+    BR NZ, R4, __mul_lp
     ADD R1, R0, R3
     ADDI R7, R7, #2
     LD R6, [R7]

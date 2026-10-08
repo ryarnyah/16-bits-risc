@@ -8,7 +8,8 @@
     ADDI R1, R1, #2
     ADDI R2, R2, #2
     LDI R4, #__data_init_end
-    BLT R1, R4, .init1
+    SLT R3, R1, R4
+    BR NZ, R3, .init1
     LDI R5, #_exit
     LDI R1, #main
     JMP R1
@@ -432,14 +433,14 @@ putchar:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-4
-    ST R2, [R6 -4]
+    ST R2, [R6 -2]
 
     LDI R1, #0x1FFE
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
@@ -460,11 +461,11 @@ getchar:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-4
-    ST R2, [R6 -4]
+    ST R2, [R6 -2]
 
     LDI R1, #0x1FFC
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
     LD R1, [R1 + 0]
 getchar_epi:
     ADDI R7, R7, #4
@@ -483,13 +484,13 @@ print:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-2
-    ST R2, [R6 -2]
+    ST R2, [R6 -1]
 
 .w2:
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     LD R1, [R1 + 0]
-    BEQ R1, R0, .we3
-    LD R1, [R6 -2]
+    BR Z, R1, .we3
+    LD R1, [R6 -1]
     LD R1, [R1 + 0]
     ST R1, [R7]
     ADDI R7, R7, #-2
@@ -499,9 +500,9 @@ print:
     LDI R1, #putchar
     JMP R1
 .cr4:
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ADDI R1, R1, #1
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     JMP .w2
 .we3:
 print_epi:
@@ -521,44 +522,44 @@ print_dec:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-2
-    ST R2, [R6 -2]
+    ST R2, [R6 -1]
 
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl7
-    JMP .el5
-.cl7:
+    SLT R3, R2, R1
+    BR Z, R3, .el5
     LDI R1, #0x002D
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr8
+    LDI R5, #.cr7
     LDI R1, #putchar
     JMP R1
-.cr8:
+.cr7:
     XOR R1, R0, R0
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ADDI R7, R7, #2
     LD R2, [R7]
     SUB R1, R2, R1
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
 .el5:
 .ei6:
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #10
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .el9
-    LD R1, [R6 -2]
+    SLT R3, R2, R1
+    BR NZ, R3, .el8
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #10
@@ -568,11 +569,11 @@ print_dec:
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.div16_ret11
+    LDI R5, #.div16_ret10
     LDI R4, #__div16
-    LD R1, [R7 +2]
+    LD R1, [R7 +1]
     JMP R4
-.div16_ret11:
+.div16_ret10:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
     LD R5, [R7]
@@ -580,16 +581,16 @@ print_dec:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr12
+    LDI R5, #.cr11
     LDI R1, #print_dec
     JMP R1
-.cr12:
-.el9:
-.ei10:
+.cr11:
+.el8:
+.ei9:
     LDI R1, #0x0030
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #10
@@ -599,11 +600,11 @@ print_dec:
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mod16_ret13
+    LDI R5, #.mod16_ret12
     LDI R4, #__mod16
-    LD R1, [R7 +2]
+    LD R1, [R7 +1]
     JMP R4
-.mod16_ret13:
+.mod16_ret12:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
     LD R5, [R7]
@@ -614,10 +615,10 @@ print_dec:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr14
+    LDI R5, #.cr13
     LDI R1, #putchar
     JMP R1
-.cr14:
+.cr13:
 print_dec_epi:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
@@ -635,54 +636,46 @@ print_hex:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-6
-    ST R2, [R6 -6]
+    ST R2, [R6 -3]
 
     XOR R1, R0, R0
-    ST R1, [R6 -4]
-.w15:
-    LD R1, [R6 -4]
+    ST R1, [R6 -2]
+.w14:
+    LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #4
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl17
-    JMP .we16
-.cl17:
-    LD R1, [R6 -6]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R1, R0, #12
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    SRL R1, R2, R1
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    SLT R3, R2, R1
+    BR Z, R3, .we15
+    LD R1, [R6 -3]
+    SRAI R1, R1, #12
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #15
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R1, R2, .cl20
-    JMP .el18
-.cl20:
+    SLT R3, R1, R2
+    BR Z, R3, .el16
     ADDI R1, R0, #15
-    ST R1, [R6 -2]
-.el18:
-.ei19:
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+.el16:
+.ei17:
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #10
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl23
-    JMP .el21
-.cl23:
+    SLT R3, R2, R1
+    BR Z, R3, .el18
     LDI R1, #0x0030
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
@@ -690,16 +683,16 @@ print_hex:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr24
+    LDI R5, #.cr20
     LDI R1, #putchar
     JMP R1
-.cr24:
-    JMP .ei22
-.el21:
+.cr20:
+    JMP .ei19
+.el18:
     LDI R1, #0x0041
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
@@ -713,24 +706,19 @@ print_hex:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr25
+    LDI R5, #.cr21
     LDI R1, #putchar
     JMP R1
-.cr25:
-.ei22:
-    LD R1, [R6 -6]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R1, R0, #4
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    SLL R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -4]
+.cr21:
+.ei19:
+    LD R1, [R6 -3]
+    SLLI R1, R1, #4
+    ST R1, [R6 -3]
+    LD R1, [R6 -2]
     ADDI R1, R1, #1
-    ST R1, [R6 -4]
-    JMP .w15
-.we16:
+    ST R1, [R6 -2]
+    JMP .w14
+.we15:
 print_hex_epi:
     ADDI R7, R7, #6
     ADDI R7, R7, #2
@@ -748,17 +736,17 @@ nl:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-2
-    ST R2, [R6 -2]
+    ST R2, [R6 -1]
 
     ADDI R1, R0, #10
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr26
+    LDI R5, #.cr22
     LDI R1, #putchar
     JMP R1
-.cr26:
+.cr22:
 nl_epi:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
@@ -776,35 +764,35 @@ pass:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-2
-    ST R2, [R6 -2]
+    ST R2, [R6 -1]
 
     LDI R1, #.Lstr0
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr27
+    LDI R5, #.cr23
     LDI R1, #print
     JMP R1
-.cr27:
-    LD R1, [R6 -2]
+.cr23:
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr28
+    LDI R5, #.cr24
     LDI R1, #print
     JMP R1
-.cr28:
+.cr24:
     ADDI R1, R0, #10
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr29
+    LDI R5, #.cr25
     LDI R1, #putchar
     JMP R1
-.cr29:
+.cr25:
 pass_epi:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
@@ -822,35 +810,35 @@ fail:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-2
-    ST R2, [R6 -2]
+    ST R2, [R6 -1]
 
     LDI R1, #.Lstr1
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr30
+    LDI R5, #.cr26
     LDI R1, #print
     JMP R1
-.cr30:
-    LD R1, [R6 -2]
+.cr26:
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr31
+    LDI R5, #.cr27
     LDI R1, #print
     JMP R1
-.cr31:
+.cr27:
     ADDI R1, R0, #10
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr32
+    LDI R5, #.cr28
     LDI R1, #putchar
     JMP R1
-.cr32:
+.cr28:
 fail_epi:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
@@ -868,254 +856,254 @@ test_alu:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-10
-    ST R2, [R6 -10]
+    ST R2, [R6 -5]
 
     ADDI R1, R0, #1
-    ST R1, [R6 -8]
-    ADDI R1, R0, #10
-    ST R1, [R6 -2]
-    ADDI R1, R0, #20
     ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ADDI R1, R0, #10
+    ST R1, [R6 -1]
+    ADDI R1, R0, #20
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #30
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el33
+    BR Z, R1, .el29
     XOR R1, R0, R0
-    ST R1, [R6 -8]
-.el33:
-.ei34:
+    ST R1, [R6 -4]
+.el29:
+.ei30:
     LDI R1, #0x0064
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     LDI R1, #0x0032
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     LDI R1, #0x0096
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el35
+    BR Z, R1, .el31
     XOR R1, R0, R0
-    ST R1, [R6 -8]
-.el35:
-.ei36:
-    LDI R1, #0x0032
-    ST R1, [R6 -2]
-    ADDI R1, R0, #30
     ST R1, [R6 -4]
-    LD R1, [R6 -2]
+.el31:
+.ei32:
+    LDI R1, #0x0032
+    ST R1, [R6 -1]
+    ADDI R1, R0, #30
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     SUB R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #20
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el37
+    BR Z, R1, .el33
     XOR R1, R0, R0
-    ST R1, [R6 -8]
-.el37:
-.ei38:
-    LDI R1, #0x00FF
-    ST R1, [R6 -2]
-    ADDI R1, R0, #15
     ST R1, [R6 -4]
-    LD R1, [R6 -2]
+.el33:
+.ei34:
+    LDI R1, #0x00FF
+    ST R1, [R6 -1]
+    ADDI R1, R0, #15
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     AND R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #15
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el39
+    BR Z, R1, .el35
     XOR R1, R0, R0
-    ST R1, [R6 -8]
-.el39:
-.ei40:
-    LDI R1, #0x00F0
-    ST R1, [R6 -2]
-    ADDI R1, R0, #15
     ST R1, [R6 -4]
-    LD R1, [R6 -2]
+.el35:
+.ei36:
+    LDI R1, #0x00F0
+    ST R1, [R6 -1]
+    ADDI R1, R0, #15
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     OR R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     LDI R1, #0x00FF
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el41
+    BR Z, R1, .el37
     XOR R1, R0, R0
-    ST R1, [R6 -8]
+    ST R1, [R6 -4]
+.el37:
+.ei38:
+    LDI R1, #0x00FF
+    ST R1, [R6 -1]
+    LDI R1, #0x00FF
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    LD R1, [R6 -2]
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    XOR R1, R2, R1
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    XOR R1, R0, R0
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    XOR R1, R2, R1
+    BR Z, R1, .el39
+    XOR R1, R0, R0
+    ST R1, [R6 -4]
+.el39:
+.ei40:
+    LDI R1, #0x00FF
+    ST R1, [R6 -1]
+    XOR R1, R0, R0
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    LD R1, [R6 -2]
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    XOR R1, R2, R1
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    LDI R1, #0x00FF
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    XOR R1, R2, R1
+    BR Z, R1, .el41
+    XOR R1, R0, R0
+    ST R1, [R6 -4]
 .el41:
 .ei42:
-    LDI R1, #0x00FF
-    ST R1, [R6 -2]
-    LDI R1, #0x00FF
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    LD R1, [R6 -4]
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    XOR R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    XOR R1, R0, R0
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    XOR R1, R2, R1
-    BEQ R1, R0, .el43
-    XOR R1, R0, R0
-    ST R1, [R6 -8]
-.el43:
-.ei44:
-    LDI R1, #0x00FF
-    ST R1, [R6 -2]
-    XOR R1, R0, R0
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    LD R1, [R6 -4]
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    XOR R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    LDI R1, #0x00FF
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    XOR R1, R2, R1
-    BEQ R1, R0, .el45
-    XOR R1, R0, R0
-    ST R1, [R6 -8]
-.el45:
-.ei46:
     ADDI R1, R0, #1
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     ADDI R1, R0, #3
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     SLL R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #8
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el47
+    BR Z, R1, .el43
     XOR R1, R0, R0
-    ST R1, [R6 -8]
-.el47:
-.ei48:
-    ADDI R1, R0, #16
-    ST R1, [R6 -2]
-    ADDI R1, R0, #2
     ST R1, [R6 -4]
-    LD R1, [R6 -2]
+.el43:
+.ei44:
+    ADDI R1, R0, #16
+    ST R1, [R6 -1]
+    ADDI R1, R0, #2
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
-    SRL R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    SRA R1, R2, R1
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #4
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el49
+    BR Z, R1, .el45
     XOR R1, R0, R0
-    ST R1, [R6 -8]
-.el49:
-.ei50:
+    ST R1, [R6 -4]
+.el45:
+.ei46:
     LDI R1, #0x00FF
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     LDI R1, #0xFF00
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #-1
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el51
+    BR Z, R1, .el47
     XOR R1, R0, R0
-    ST R1, [R6 -8]
-.el51:
-.ei52:
-    LD R1, [R6 -10]
+    ST R1, [R6 -4]
+.el47:
+.ei48:
+    LD R1, [R6 -5]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -8]
+    LD R1, [R6 -4]
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -8]
+    LD R1, [R6 -4]
 test_alu_epi:
     ADDI R7, R7, #10
     ADDI R7, R7, #2
@@ -1133,21 +1121,67 @@ test_branches:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-6
-    ST R2, [R6 -6]
+    ST R2, [R6 -3]
 
     LDI R1, #0x002A
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     LDI R1, #0x002A
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el53
-    LD R1, [R6 -6]
+    BR Z, R1, .el49
+    LD R1, [R6 -3]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    XOR R1, R0, R0
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    ST R1, [R2 + 0]
+    XOR R1, R0, R0
+    JMP test_branches_epi
+.el49:
+.ei50:
+    ADDI R1, R0, #10
+    ST R1, [R6 -1]
+    ADDI R1, R0, #20
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    LD R1, [R6 -2]
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    XOR R1, R2, R1
+    BR NZ, R1, .el51
+    LD R1, [R6 -3]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    XOR R1, R0, R0
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    ST R1, [R2 + 0]
+    XOR R1, R0, R0
+    JMP test_branches_epi
+.el51:
+.ei52:
+    ADDI R1, R0, #5
+    ST R1, [R6 -1]
+    ADDI R1, R0, #10
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    LD R1, [R6 -2]
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    SLT R3, R2, R1
+    BR NZ, R3, .el53
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1158,19 +1192,15 @@ test_branches:
     JMP test_branches_epi
 .el53:
 .ei54:
-    ADDI R1, R0, #10
-    ST R1, [R6 -2]
-    ADDI R1, R0, #20
-    ST R1, [R6 -4]
     LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -1]
     ADDI R7, R7, #2
     LD R2, [R7]
-    XOR R1, R2, R1
-    BNE R1, R0, .el55
-    LD R1, [R6 -6]
+    SLT R3, R2, R1
+    BR Z, R3, .el55
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1181,18 +1211,19 @@ test_branches:
     JMP test_branches_epi
 .el55:
 .ei56:
+    ADDI R1, R0, #10
+    ST R1, [R6 -1]
     ADDI R1, R0, #5
     ST R1, [R6 -2]
-    ADDI R1, R0, #10
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .el57
-    LD R1, [R6 -6]
+    SLT R3, R1, R2
+    BR NZ, R3, .el57
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1203,49 +1234,7 @@ test_branches:
     JMP test_branches_epi
 .el57:
 .ei58:
-    LD R1, [R6 -4]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    BLT R2, R1, .cl61
-    JMP .el59
-.cl61:
-    LD R1, [R6 -6]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    XOR R1, R0, R0
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    ST R1, [R2 + 0]
-    XOR R1, R0, R0
-    JMP test_branches_epi
-.el59:
-.ei60:
-    ADDI R1, R0, #10
-    ST R1, [R6 -2]
-    ADDI R1, R0, #5
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    LD R1, [R6 -4]
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    BLT R1, R2, .el62
-    LD R1, [R6 -6]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    XOR R1, R0, R0
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    ST R1, [R2 + 0]
-    XOR R1, R0, R0
-    JMP test_branches_epi
-.el62:
-.ei63:
-    LD R1, [R6 -6]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -1269,10 +1258,10 @@ test_memory:
     ADDI R7, R7, #-2
     ADD R6, R7, R0
     ADDI R6, R6, #2
-    ADDI R7, R7, #-6
-    ST R2, [R6 -6]
+    ADDI R7, R7, #-20
+    ST R2, [R6 -10]
 
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1287,7 +1276,7 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -1302,7 +1291,7 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #2
@@ -1317,7 +1306,7 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #3
@@ -1332,7 +1321,7 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #4
@@ -1347,7 +1336,7 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #5
@@ -1362,7 +1351,7 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #6
@@ -1377,7 +1366,7 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #7
@@ -1393,8 +1382,8 @@ test_memory:
     LD R2, [R7]
     ST R1, [R2 + 0]
     XOR R1, R0, R0
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -9]
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1410,8 +1399,8 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el64
-    LD R1, [R6 -6]
+    BR Z, R1, .el59
+    LD R1, [R6 -10]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1420,9 +1409,9 @@ test_memory:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_memory_epi
-.el64:
-.ei65:
-    LD R1, [R6 -2]
+.el59:
+.ei60:
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #3
@@ -1438,8 +1427,8 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el66
-    LD R1, [R6 -6]
+    BR Z, R1, .el61
+    LD R1, [R6 -10]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1448,9 +1437,9 @@ test_memory:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_memory_epi
-.el66:
-.ei67:
-    LD R1, [R6 -2]
+.el61:
+.ei62:
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #7
@@ -1466,8 +1455,8 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el68
-    LD R1, [R6 -6]
+    BR Z, R1, .el63
+    LD R1, [R6 -10]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1476,9 +1465,9 @@ test_memory:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_memory_epi
-.el68:
-.ei69:
-    LD R1, [R6 -2]
+.el63:
+.ei64:
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #2
@@ -1493,7 +1482,7 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #2
@@ -1509,8 +1498,8 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el70
-    LD R1, [R6 -6]
+    BR Z, R1, .el65
+    LD R1, [R6 -10]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1519,14 +1508,14 @@ test_memory:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_memory_epi
-.el70:
-.ei71:
+.el65:
+.ei66:
     ADDI R1, R0, #5
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -9]
+    ADDI R1, R6, #-16
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -9]
     ADDI R3, R0, #1
     SLL R1, R1, R3
     ADDI R7, R7, #2
@@ -1539,8 +1528,8 @@ test_memory:
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el72
-    LD R1, [R6 -6]
+    BR Z, R1, .el67
+    LD R1, [R6 -10]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1549,9 +1538,9 @@ test_memory:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_memory_epi
-.el72:
-.ei73:
-    LD R1, [R6 -6]
+.el67:
+.ei68:
+    LD R1, [R6 -10]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -1560,7 +1549,7 @@ test_memory:
     ST R1, [R2 + 0]
     ADDI R1, R0, #1
 test_memory_epi:
-    ADDI R7, R7, #6
+    ADDI R7, R7, #20
     ADDI R7, R7, #2
     LD R6, [R7]
     ADDI R7, R7, #2
@@ -1576,20 +1565,21 @@ deep:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-2
-    ST R2, [R6 -2]
+    ST R2, [R6 -1]
 
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R1, R2, .el74
+    SLT R3, R1, R2
+    BR NZ, R3, .el69
     LDI R1, #0x002A
     JMP deep_epi
-.el74:
-.ei75:
-    LD R1, [R6 -2]
+.el69:
+.ei70:
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -1600,10 +1590,10 @@ deep:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr76
+    LDI R5, #.cr71
     LDI R1, #deep
     JMP R1
-.cr76:
+.cr71:
     ADDI R1, R1, #1
 deep_epi:
     ADDI R7, R7, #2
@@ -1622,27 +1612,27 @@ test_stack:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-4
-    ST R2, [R6 -4]
+    ST R2, [R6 -2]
 
     ADDI R1, R0, #5
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr77
+    LDI R5, #.cr72
     LDI R1, #deep
     JMP R1
-.cr77:
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+.cr72:
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     LDI R1, #0x002F
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el78
-    LD R1, [R6 -4]
+    BR Z, R1, .el73
+    LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1651,9 +1641,9 @@ test_stack:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_stack_epi
-.el78:
-.ei79:
-    LD R1, [R6 -4]
+.el73:
+.ei74:
+    LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -1678,40 +1668,40 @@ test_runlib:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-8
-    ST R2, [R6 -8]
+    ST R2, [R6 -4]
 
     ADDI R1, R0, #7
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     ADDI R1, R0, #8
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mul16_ret80
+    LDI R5, #.mul16_ret75
     LDI R4, #__mul16
-    LD R1, [R7 +2]
+    LD R1, [R7 +1]
     JMP R4
-.mul16_ret80:
+.mul16_ret75:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
     LD R5, [R7]
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     LDI R1, #0x0038
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el81
-    LD R1, [R6 -8]
+    BR Z, R1, .el76
+    LD R1, [R6 -4]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1720,40 +1710,40 @@ test_runlib:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_runlib_epi
-.el81:
-.ei82:
+.el76:
+.ei77:
     LDI R1, #0x007B
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     LDI R1, #0x002D
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mul16_ret83
+    LDI R5, #.mul16_ret78
     LDI R4, #__mul16
-    LD R1, [R7 +2]
+    LD R1, [R7 +1]
     JMP R4
-.mul16_ret83:
+.mul16_ret78:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
     LD R5, [R7]
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     LDI R1, #0x159F
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el84
-    LD R1, [R6 -8]
+    BR Z, R1, .el79
+    LD R1, [R6 -4]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1762,40 +1752,40 @@ test_runlib:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_runlib_epi
-.el84:
-.ei85:
+.el79:
+.ei80:
     LDI R1, #0x0064
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     ADDI R1, R0, #7
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.div16_ret86
+    LDI R5, #.div16_ret81
     LDI R4, #__div16
-    LD R1, [R7 +2]
+    LD R1, [R7 +1]
     JMP R4
-.div16_ret86:
+.div16_ret81:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
     LD R5, [R7]
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #14
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el87
-    LD R1, [R6 -8]
+    BR Z, R1, .el82
+    LD R1, [R6 -4]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1804,40 +1794,40 @@ test_runlib:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_runlib_epi
-.el87:
-.ei88:
+.el82:
+.ei83:
     LDI R1, #0x0064
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     ADDI R1, R0, #7
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mod16_ret89
+    LDI R5, #.mod16_ret84
     LDI R4, #__mod16
-    LD R1, [R7 +2]
+    LD R1, [R7 +1]
     JMP R4
-.mod16_ret89:
+.mod16_ret84:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
     LD R5, [R7]
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #2
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el90
-    LD R1, [R6 -8]
+    BR Z, R1, .el85
+    LD R1, [R6 -4]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1846,9 +1836,9 @@ test_runlib:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_runlib_epi
-.el90:
-.ei91:
-    LD R1, [R6 -8]
+.el85:
+.ei86:
+    LD R1, [R6 -4]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -1872,10 +1862,10 @@ test_arrays:
     ADDI R7, R7, #-2
     ADD R6, R7, R0
     ADDI R6, R6, #2
-    ADDI R7, R7, #-8
-    ST R2, [R6 -8]
+    ADDI R7, R7, #-18
+    ST R2, [R6 -9]
 
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-12
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -1890,7 +1880,7 @@ test_arrays:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-12
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -1905,7 +1895,7 @@ test_arrays:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-12
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #2
@@ -1920,7 +1910,7 @@ test_arrays:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-12
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #3
@@ -1935,7 +1925,7 @@ test_arrays:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-12
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #4
@@ -1950,7 +1940,7 @@ test_arrays:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-12
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #5
@@ -1966,26 +1956,25 @@ test_arrays:
     LD R2, [R7]
     ST R1, [R2 + 0]
     XOR R1, R0, R0
-    ST R1, [R6 -6]
+    ST R1, [R6 -8]
     XOR R1, R0, R0
-    ST R1, [R6 -4]
-.w92:
-    LD R1, [R6 -4]
+    ST R1, [R6 -7]
+.w87:
+    LD R1, [R6 -7]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #6
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl94
-    JMP .we93
-.cl94:
-    LD R1, [R6 -6]
+    SLT R3, R2, R1
+    BR Z, R3, .we88
+    LD R1, [R6 -8]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-12
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -7]
     ADDI R3, R0, #1
     SLL R1, R1, R3
     ADDI R7, R7, #2
@@ -1995,21 +1984,21 @@ test_arrays:
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -4]
+    ST R1, [R6 -8]
+    LD R1, [R6 -7]
     ADDI R1, R1, #1
-    ST R1, [R6 -4]
-    JMP .w92
-.we93:
-    LD R1, [R6 -6]
+    ST R1, [R6 -7]
+    JMP .w87
+.we88:
+    LD R1, [R6 -8]
     ST R1, [R7]
     ADDI R7, R7, #-2
     LDI R1, #0x00D2
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el95
-    LD R1, [R6 -8]
+    BR Z, R1, .el89
+    LD R1, [R6 -9]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -2018,14 +2007,14 @@ test_arrays:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_arrays_epi
-.el95:
-.ei96:
+.el89:
+.ei90:
     ADDI R1, R0, #1
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -7]
+    ADDI R1, R6, #-12
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -7]
     ADDI R3, R0, #1
     SLL R1, R1, R3
     ADDI R7, R7, #2
@@ -2037,7 +2026,7 @@ test_arrays:
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -2]
+    ADDI R1, R6, #-12
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -2053,8 +2042,8 @@ test_arrays:
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el97
-    LD R1, [R6 -8]
+    BR Z, R1, .el91
+    LD R1, [R6 -9]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -2063,9 +2052,9 @@ test_arrays:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_arrays_epi
-.el97:
-.ei98:
-    LD R1, [R6 -8]
+.el91:
+.ei92:
+    LD R1, [R6 -9]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -2074,7 +2063,7 @@ test_arrays:
     ST R1, [R2 + 0]
     ADDI R1, R0, #1
 test_arrays_epi:
-    ADDI R7, R7, #8
+    ADDI R7, R7, #18
     ADDI R7, R7, #2
     LD R6, [R7]
     ADDI R7, R7, #2
@@ -2090,13 +2079,13 @@ test_pointers:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-6
-    ST R2, [R6 -6]
+    ST R2, [R6 -3]
 
     LDI R1, #0x004D
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     ADDI R1, R6, #-2
-    ST R1, [R6 -4]
-    LD R1, [R6 -4]
+    ST R1, [R6 -2]
+    LD R1, [R6 -2]
     LD R1, [R1 + 0]
     ST R1, [R7]
     ADDI R7, R7, #-2
@@ -2104,8 +2093,8 @@ test_pointers:
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el99
-    LD R1, [R6 -6]
+    BR Z, R1, .el93
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -2114,24 +2103,24 @@ test_pointers:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_pointers_epi
-.el99:
-.ei100:
-    LD R1, [R6 -4]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    LDI R1, #0x0058
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    ST R1, [R2 + 0]
+.el93:
+.ei94:
     LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
     LDI R1, #0x0058
     ADDI R7, R7, #2
     LD R2, [R7]
+    ST R1, [R2 + 0]
+    LD R1, [R6 -1]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    LDI R1, #0x0058
+    ADDI R7, R7, #2
+    LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el101
-    LD R1, [R6 -6]
+    BR Z, R1, .el95
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -2140,9 +2129,9 @@ test_pointers:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_pointers_epi
-.el101:
-.ei102:
-    LD R1, [R6 -6]
+.el95:
+.ei96:
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -2167,19 +2156,19 @@ test_ldi:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-4
-    ST R2, [R6 -4]
+    ST R2, [R6 -2]
 
     ADDI R1, R0, #-1
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #-1
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el103
-    LD R1, [R6 -4]
+    BR Z, R1, .el97
+    LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -2188,19 +2177,19 @@ test_ldi:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_ldi_epi
-.el103:
-.ei104:
+.el97:
+.ei98:
     LDI R1, #0x7FFF
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     LDI R1, #0x7FFF
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el105
-    LD R1, [R6 -4]
+    BR Z, R1, .el99
+    LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -2209,19 +2198,19 @@ test_ldi:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_ldi_epi
-.el105:
-.ei106:
+.el99:
+.ei100:
     ADDI R1, R0, #1
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el107
-    LD R1, [R6 -4]
+    BR Z, R1, .el101
+    LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
@@ -2230,9 +2219,9 @@ test_ldi:
     ST R1, [R2 + 0]
     XOR R1, R0, R0
     JMP test_ldi_epi
-.el107:
-.ei108:
-    LD R1, [R6 -4]
+.el101:
+.ei102:
+    LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -2257,9 +2246,9 @@ test_uart_tx:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-2
-    ST R2, [R6 -2]
+    ST R2, [R6 -1]
 
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
@@ -2284,90 +2273,88 @@ test_uart_rx:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-8
-    ST R2, [R6 -8]
+    ST R2, [R6 -4]
 
     LDI R1, #.Lstr2
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr109
+    LDI R5, #.cr103
     LDI R1, #print
     JMP R1
-.cr109:
-    LDI R5, #.cr110
+.cr103:
+    LDI R5, #.cr104
     LDI R1, #getchar
     JMP R1
-.cr110:
+.cr104:
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    LDI R5, #.cr105
+    LDI R1, #putchar
+    JMP R1
+.cr105:
+    LDI R5, #.cr106
+    LDI R1, #getchar
+    JMP R1
+.cr106:
     ST R1, [R6 -2]
     LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr111
+    LDI R5, #.cr107
     LDI R1, #putchar
     JMP R1
-.cr111:
-    LDI R5, #.cr112
-    LDI R1, #getchar
-    JMP R1
-.cr112:
-    ST R1, [R6 -4]
-    LD R1, [R6 -4]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    LDI R5, #.cr113
-    LDI R1, #putchar
-    JMP R1
-.cr113:
+.cr107:
     ADDI R1, R0, #10
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr114
+    LDI R5, #.cr108
     LDI R1, #putchar
     JMP R1
-.cr114:
+.cr108:
     ADDI R1, R0, #1
-    ST R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -1]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    LDI R1, #0x0020
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    SLT R3, R2, R1
+    BR Z, R3, .el109
+    XOR R1, R0, R0
+    ST R1, [R6 -3]
+.el109:
+.ei110:
     LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
     LDI R1, #0x0020
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl117
-    JMP .el115
-.cl117:
+    SLT R3, R2, R1
+    BR Z, R3, .el111
     XOR R1, R0, R0
-    ST R1, [R6 -6]
-.el115:
-.ei116:
+    ST R1, [R6 -3]
+.el111:
+.ei112:
     LD R1, [R6 -4]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R1, #0x0020
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    BLT R2, R1, .cl120
-    JMP .el118
-.cl120:
-    XOR R1, R0, R0
-    ST R1, [R6 -6]
-.el118:
-.ei119:
-    LD R1, [R6 -8]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    LD R1, [R6 -6]
+    LD R1, [R6 -3]
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
-    LD R1, [R6 -6]
+    LD R1, [R6 -3]
 test_uart_rx_epi:
     ADDI R7, R7, #8
     ADDI R7, R7, #2
@@ -2387,32 +2374,91 @@ main:
     ADDI R7, R7, #-6
 
     XOR R1, R0, R0
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     XOR R1, R0, R0
-    ST R1, [R6 -4]
-    LDI R5, #.cr121
+    ST R1, [R6 -2]
+    LDI R5, #.cr113
     LDI R1, #nl
     JMP R1
-.cr121:
+.cr113:
     LDI R1, #.Lstr3
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr122
+    LDI R5, #.cr114
     LDI R1, #print
     JMP R1
-.cr122:
+.cr114:
     LDI R1, #.Lstr4
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr123
+    LDI R5, #.cr115
     LDI R1, #print
     JMP R1
-.cr123:
+.cr115:
     LDI R1, #.Lstr5
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    LDI R5, #.cr116
+    LDI R1, #print
+    JMP R1
+.cr116:
+    LDI R5, #.cr117
+    LDI R1, #nl
+    JMP R1
+.cr117:
+    LDI R1, #.Lstr6
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    LDI R5, #.cr118
+    LDI R1, #print
+    JMP R1
+.cr118:
+    ADDI R1, R6, #-6
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    LDI R5, #.cr121
+    LDI R1, #test_alu
+    JMP R1
+.cr121:
+    BR Z, R1, .el119
+    LDI R1, #.Lstr7
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    LDI R5, #.cr122
+    LDI R1, #pass
+    JMP R1
+.cr122:
+    LD R1, [R6 -1]
+    ADDI R1, R1, #1
+    ST R1, [R6 -1]
+    JMP .ei120
+.el119:
+    LDI R1, #.Lstr8
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    LDI R5, #.cr123
+    LDI R1, #fail
+    JMP R1
+.cr123:
+    LD R1, [R6 -2]
+    ADDI R1, R1, #1
+    ST R1, [R6 -2]
+.ei120:
+    LDI R1, #.Lstr9
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
@@ -2421,425 +2467,425 @@ main:
     LDI R1, #print
     JMP R1
 .cr124:
-    LDI R5, #.cr125
-    LDI R1, #nl
-    JMP R1
-.cr125:
-    LDI R1, #.Lstr6
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    LDI R5, #.cr126
-    LDI R1, #print
-    JMP R1
-.cr126:
     ADDI R1, R6, #-6
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr129
-    LDI R1, #test_alu
-    JMP R1
-.cr129:
-    BEQ R1, R0, .el127
-    LDI R1, #.Lstr7
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    LDI R5, #.cr130
-    LDI R1, #pass
-    JMP R1
-.cr130:
-    LD R1, [R6 -2]
-    ADDI R1, R1, #1
-    ST R1, [R6 -2]
-    JMP .ei128
-.el127:
-    LDI R1, #.Lstr8
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    LDI R5, #.cr131
-    LDI R1, #fail
-    JMP R1
-.cr131:
-    LD R1, [R6 -4]
-    ADDI R1, R1, #1
-    ST R1, [R6 -4]
-.ei128:
-    LDI R1, #.Lstr9
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    LDI R5, #.cr132
-    LDI R1, #print
-    JMP R1
-.cr132:
-    ADDI R1, R6, #-6
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    LDI R5, #.cr135
+    LDI R5, #.cr127
     LDI R1, #test_branches
     JMP R1
-.cr135:
-    BEQ R1, R0, .el133
+.cr127:
+    BR Z, R1, .el125
     LDI R1, #.Lstr10
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr136
+    LDI R5, #.cr128
     LDI R1, #pass
     JMP R1
-.cr136:
-    LD R1, [R6 -2]
+.cr128:
+    LD R1, [R6 -1]
     ADDI R1, R1, #1
-    ST R1, [R6 -2]
-    JMP .ei134
-.el133:
+    ST R1, [R6 -1]
+    JMP .ei126
+.el125:
     LDI R1, #.Lstr11
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr137
+    LDI R5, #.cr129
     LDI R1, #fail
     JMP R1
-.cr137:
-    LD R1, [R6 -4]
+.cr129:
+    LD R1, [R6 -2]
     ADDI R1, R1, #1
-    ST R1, [R6 -4]
-.ei134:
+    ST R1, [R6 -2]
+.ei126:
     LDI R1, #.Lstr12
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr138
+    LDI R5, #.cr130
     LDI R1, #print
     JMP R1
-.cr138:
+.cr130:
     ADDI R1, R6, #-6
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr141
+    LDI R5, #.cr133
     LDI R1, #test_memory
     JMP R1
-.cr141:
-    BEQ R1, R0, .el139
+.cr133:
+    BR Z, R1, .el131
     LDI R1, #.Lstr13
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr142
+    LDI R5, #.cr134
     LDI R1, #pass
     JMP R1
-.cr142:
-    LD R1, [R6 -2]
+.cr134:
+    LD R1, [R6 -1]
     ADDI R1, R1, #1
-    ST R1, [R6 -2]
-    JMP .ei140
-.el139:
+    ST R1, [R6 -1]
+    JMP .ei132
+.el131:
     LDI R1, #.Lstr14
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr143
+    LDI R5, #.cr135
     LDI R1, #fail
     JMP R1
-.cr143:
-    LD R1, [R6 -4]
+.cr135:
+    LD R1, [R6 -2]
     ADDI R1, R1, #1
-    ST R1, [R6 -4]
-.ei140:
+    ST R1, [R6 -2]
+.ei132:
     LDI R1, #.Lstr15
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr144
+    LDI R5, #.cr136
     LDI R1, #print
     JMP R1
-.cr144:
+.cr136:
     ADDI R1, R6, #-6
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr147
+    LDI R5, #.cr139
     LDI R1, #test_stack
     JMP R1
-.cr147:
-    BEQ R1, R0, .el145
+.cr139:
+    BR Z, R1, .el137
     LDI R1, #.Lstr16
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr148
+    LDI R5, #.cr140
     LDI R1, #pass
     JMP R1
-.cr148:
-    LD R1, [R6 -2]
+.cr140:
+    LD R1, [R6 -1]
     ADDI R1, R1, #1
-    ST R1, [R6 -2]
-    JMP .ei146
-.el145:
+    ST R1, [R6 -1]
+    JMP .ei138
+.el137:
     LDI R1, #.Lstr17
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr149
+    LDI R5, #.cr141
     LDI R1, #fail
     JMP R1
-.cr149:
-    LD R1, [R6 -4]
+.cr141:
+    LD R1, [R6 -2]
     ADDI R1, R1, #1
-    ST R1, [R6 -4]
-.ei146:
+    ST R1, [R6 -2]
+.ei138:
     LDI R1, #.Lstr18
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr150
+    LDI R5, #.cr142
     LDI R1, #print
     JMP R1
-.cr150:
+.cr142:
     ADDI R1, R6, #-6
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr153
+    LDI R5, #.cr145
     LDI R1, #test_runlib
     JMP R1
-.cr153:
-    BEQ R1, R0, .el151
+.cr145:
+    BR Z, R1, .el143
     LDI R1, #.Lstr19
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr154
+    LDI R5, #.cr146
     LDI R1, #pass
     JMP R1
-.cr154:
-    LD R1, [R6 -2]
+.cr146:
+    LD R1, [R6 -1]
     ADDI R1, R1, #1
-    ST R1, [R6 -2]
-    JMP .ei152
-.el151:
+    ST R1, [R6 -1]
+    JMP .ei144
+.el143:
     LDI R1, #.Lstr20
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr155
+    LDI R5, #.cr147
     LDI R1, #fail
     JMP R1
-.cr155:
-    LD R1, [R6 -4]
+.cr147:
+    LD R1, [R6 -2]
     ADDI R1, R1, #1
-    ST R1, [R6 -4]
-.ei152:
+    ST R1, [R6 -2]
+.ei144:
     LDI R1, #.Lstr21
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr156
+    LDI R5, #.cr148
     LDI R1, #print
     JMP R1
-.cr156:
+.cr148:
     ADDI R1, R6, #-6
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr159
+    LDI R5, #.cr151
     LDI R1, #test_arrays
     JMP R1
-.cr159:
-    BEQ R1, R0, .el157
+.cr151:
+    BR Z, R1, .el149
     LDI R1, #.Lstr22
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr160
+    LDI R5, #.cr152
     LDI R1, #pass
     JMP R1
-.cr160:
-    LD R1, [R6 -2]
+.cr152:
+    LD R1, [R6 -1]
     ADDI R1, R1, #1
-    ST R1, [R6 -2]
-    JMP .ei158
-.el157:
+    ST R1, [R6 -1]
+    JMP .ei150
+.el149:
     LDI R1, #.Lstr23
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr161
+    LDI R5, #.cr153
     LDI R1, #fail
     JMP R1
-.cr161:
-    LD R1, [R6 -4]
+.cr153:
+    LD R1, [R6 -2]
     ADDI R1, R1, #1
-    ST R1, [R6 -4]
-.ei158:
+    ST R1, [R6 -2]
+.ei150:
     LDI R1, #.Lstr24
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr162
+    LDI R5, #.cr154
     LDI R1, #print
     JMP R1
-.cr162:
+.cr154:
     ADDI R1, R6, #-6
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr165
+    LDI R5, #.cr157
     LDI R1, #test_pointers
     JMP R1
-.cr165:
-    BEQ R1, R0, .el163
+.cr157:
+    BR Z, R1, .el155
     LDI R1, #.Lstr25
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr166
+    LDI R5, #.cr158
     LDI R1, #pass
     JMP R1
-.cr166:
-    LD R1, [R6 -2]
+.cr158:
+    LD R1, [R6 -1]
     ADDI R1, R1, #1
-    ST R1, [R6 -2]
-    JMP .ei164
-.el163:
+    ST R1, [R6 -1]
+    JMP .ei156
+.el155:
     LDI R1, #.Lstr26
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr167
+    LDI R5, #.cr159
     LDI R1, #fail
     JMP R1
-.cr167:
-    LD R1, [R6 -4]
+.cr159:
+    LD R1, [R6 -2]
     ADDI R1, R1, #1
-    ST R1, [R6 -4]
-.ei164:
+    ST R1, [R6 -2]
+.ei156:
     LDI R1, #.Lstr27
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr168
+    LDI R5, #.cr160
     LDI R1, #print
     JMP R1
-.cr168:
+.cr160:
     ADDI R1, R6, #-6
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr171
+    LDI R5, #.cr163
     LDI R1, #test_ldi
     JMP R1
-.cr171:
-    BEQ R1, R0, .el169
+.cr163:
+    BR Z, R1, .el161
     LDI R1, #.Lstr28
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr172
+    LDI R5, #.cr164
     LDI R1, #pass
     JMP R1
-.cr172:
-    LD R1, [R6 -2]
+.cr164:
+    LD R1, [R6 -1]
     ADDI R1, R1, #1
-    ST R1, [R6 -2]
-    JMP .ei170
-.el169:
+    ST R1, [R6 -1]
+    JMP .ei162
+.el161:
     LDI R1, #.Lstr29
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr173
+    LDI R5, #.cr165
     LDI R1, #fail
     JMP R1
-.cr173:
-    LD R1, [R6 -4]
+.cr165:
+    LD R1, [R6 -2]
     ADDI R1, R1, #1
-    ST R1, [R6 -4]
-.ei170:
+    ST R1, [R6 -2]
+.ei162:
     LDI R1, #.Lstr30
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr174
+    LDI R5, #.cr166
     LDI R1, #print
     JMP R1
-.cr174:
+.cr166:
     ADDI R1, R6, #-6
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr177
+    LDI R5, #.cr169
     LDI R1, #test_uart_tx
     JMP R1
-.cr177:
-    BEQ R1, R0, .el175
+.cr169:
+    BR Z, R1, .el167
     LDI R1, #.Lstr31
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr178
+    LDI R5, #.cr170
     LDI R1, #pass
     JMP R1
-.cr178:
-    LD R1, [R6 -2]
+.cr170:
+    LD R1, [R6 -1]
     ADDI R1, R1, #1
-    ST R1, [R6 -2]
-    JMP .ei176
-.el175:
+    ST R1, [R6 -1]
+    JMP .ei168
+.el167:
     LDI R1, #.Lstr32
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr179
+    LDI R5, #.cr171
     LDI R1, #fail
     JMP R1
-.cr179:
-    LD R1, [R6 -4]
+.cr171:
+    LD R1, [R6 -2]
     ADDI R1, R1, #1
-    ST R1, [R6 -4]
-.ei176:
+    ST R1, [R6 -2]
+.ei168:
     LDI R1, #.Lstr33
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    LDI R5, #.cr172
+    LDI R1, #print
+    JMP R1
+.cr172:
+    ADDI R1, R6, #-6
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    LDI R5, #.cr175
+    LDI R1, #test_uart_rx
+    JMP R1
+.cr175:
+    BR Z, R1, .el173
+    LDI R1, #.Lstr34
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    LDI R5, #.cr176
+    LDI R1, #pass
+    JMP R1
+.cr176:
+    LD R1, [R6 -1]
+    ADDI R1, R1, #1
+    ST R1, [R6 -1]
+    JMP .ei174
+.el173:
+    LDI R1, #.Lstr35
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    LDI R5, #.cr177
+    LDI R1, #fail
+    JMP R1
+.cr177:
+    LD R1, [R6 -2]
+    ADDI R1, R1, #1
+    ST R1, [R6 -2]
+.ei174:
+    LDI R5, #.cr178
+    LDI R1, #nl
+    JMP R1
+.cr178:
+    LDI R1, #.Lstr36
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    LDI R5, #.cr179
+    LDI R1, #print
+    JMP R1
+.cr179:
+    LDI R1, #.Lstr37
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
@@ -2848,87 +2894,28 @@ main:
     LDI R1, #print
     JMP R1
 .cr180:
-    ADDI R1, R6, #-6
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr183
-    LDI R1, #test_uart_rx
-    JMP R1
-.cr183:
-    BEQ R1, R0, .el181
-    LDI R1, #.Lstr34
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    LDI R5, #.cr184
-    LDI R1, #pass
-    JMP R1
-.cr184:
-    LD R1, [R6 -2]
-    ADDI R1, R1, #1
-    ST R1, [R6 -2]
-    JMP .ei182
-.el181:
-    LDI R1, #.Lstr35
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    LDI R5, #.cr185
-    LDI R1, #fail
-    JMP R1
-.cr185:
-    LD R1, [R6 -4]
-    ADDI R1, R1, #1
-    ST R1, [R6 -4]
-.ei182:
-    LDI R5, #.cr186
-    LDI R1, #nl
-    JMP R1
-.cr186:
-    LDI R1, #.Lstr36
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    LDI R5, #.cr187
-    LDI R1, #print
-    JMP R1
-.cr187:
-    LDI R1, #.Lstr37
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    LDI R5, #.cr188
-    LDI R1, #print
-    JMP R1
-.cr188:
-    LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    LDI R5, #.cr189
+    LDI R5, #.cr181
     LDI R1, #print_dec
     JMP R1
-.cr189:
+.cr181:
     LDI R1, #.Lstr38
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr190
+    LDI R5, #.cr182
     LDI R1, #print
     JMP R1
-.cr190:
-    LD R1, [R6 -2]
+.cr182:
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
@@ -2936,35 +2923,35 @@ main:
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr191
+    LDI R5, #.cr183
     LDI R1, #print_dec
     JMP R1
-.cr191:
+.cr183:
     LDI R1, #.Lstr39
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr192
+    LDI R5, #.cr184
     LDI R1, #print
     JMP R1
-.cr192:
+.cr184:
     LDI R1, #.Lstr40
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr193
+    LDI R5, #.cr185
     LDI R1, #print
     JMP R1
-.cr193:
-    LDI R5, #.cr194
+.cr185:
+    LDI R5, #.cr186
     LDI R1, #nl
     JMP R1
-.cr194:
-.w195:
-    JMP .w195
-.we196:
+.cr186:
+.w187:
+    JMP .w187
+.we188:
 main_epi:
     ADDI R7, R7, #6
     ADDI R7, R7, #2
@@ -2984,21 +2971,21 @@ __mul16:
 __mul_lp:
     ADDI R6, R0, #1
     AND R6, R1, R6
-    BEQ R6, R0, __mul_sk
+    BR Z, R6, __mul_sk
     ADD R3, R3, R2
 __mul_sk:
     ADDI R6, R0, #1
     SLL R2, R2, R6
     SRL R1, R1, R6
     ADDI R4, R4, #-1
-    BNE R4, R0, __mul_lp
+    BR NZ, R4, __mul_lp
     ADD R1, R0, R3
     ADDI R7, R7, #2
     LD R6, [R7]
     JMP R5
 
 __div16:
-    BEQ R1, R0, __div_exit
+    BR Z, R1, __div_exit
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R6, [R7]
@@ -3012,20 +2999,20 @@ __div_lp:
     SLL R3, R3, R6
     LDI R6, #0x8000
     AND R6, R2, R6
-    BEQ R6, R0, __div_nb
+    BR Z, R6, __div_nb
     ADDI R6, R0, #1
     OR R5, R5, R6
 __div_nb:
     ADDI R6, R0, #1
     SLL R2, R2, R6
-    SUB R6, R5, R1
-    BLT R5, R1, __div_sk
-    ADD R5, R0, R6
+    SLT R6, R5, R1
+    BR NZ, R6, __div_sk
+    SUB R5, R5, R1
     ADDI R6, R0, #1
     OR R3, R3, R6
 __div_sk:
     ADDI R4, R4, #-1
-    BNE R4, R0, __div_lp
+    BR NZ, R4, __div_lp
     ADD R1, R0, R3
     ADDI R7, R7, #2
     LD R6, [R7]
@@ -3034,7 +3021,7 @@ __div_sk:
     JMP R5
 
 __mod16:
-    BEQ R1, R0, __div_exit
+    BR Z, R1, __div_exit
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R6, [R7]
@@ -3047,18 +3034,18 @@ __mod_lp:
     SLL R5, R5, R6
     LDI R6, #0x8000
     AND R6, R2, R6
-    BEQ R6, R0, __mod_nb
+    BR Z, R6, __mod_nb
     ADDI R6, R0, #1
     OR R5, R5, R6
 __mod_nb:
     ADDI R6, R0, #1
     SLL R2, R2, R6
-    SUB R6, R5, R1
-    BLT R5, R1, __mod_sk
-    ADD R5, R0, R6
+    SLT R6, R5, R1
+    BR NZ, R6, __mod_sk
+    SUB R5, R5, R1
 __mod_sk:
     ADDI R4, R4, #-1
-    BNE R4, R0, __mod_lp
+    BR NZ, R4, __mod_lp
     ADD R1, R0, R5
     ADDI R7, R7, #2
     LD R6, [R7]

@@ -58,7 +58,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private def rsAddrOf(i: Bits): UInt = {
     val opc = i(15 downto 12)
     val cf = i(8 downto 6)
-    val isBr = (opc === B"1100") || (opc === B"1101") || (opc === B"1110")
+    // v3.2: BR is single-register (Rs in [11:9], cond in [8:7]).
+    val isBr = (opc === B"1100")
     val isJmp = (opc === B"1011") && (cf === B"000") && (i(5 downto 0) === 0)
     val isGb = (opc === B"1011") && (cf.asUInt >= 3)
     val isByte = (opc === B"1111") && !i(8) &&
@@ -70,9 +71,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
     val opc = i(15 downto 12)
     val isSt = (opc === B"1010") ||
       ((opc === B"1111") && !i(8) && (i(7 downto 6) === B"10"))
-    val isBr = (opc === B"1100") || (opc === B"1101") || (opc === B"1110")
-    Mux(isSt, i(11 downto 9).asUInt,
-      Mux(isBr, i(8 downto 6).asUInt, i(5 downto 3).asUInt))
+    // v3.2: branches read no Rt (falls through to rtReg, unused).
+    Mux(isSt, i(11 downto 9).asUInt, i(5 downto 3).asUInt)
   }
 
   // =========================================================================
@@ -112,9 +112,9 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // the debug/bus commands 0x03/0x04/0x05 (flsPipeline).
   private val halted = Reg(Bool()) init False
 
-  private val rEX_isBEQ = rEX_instr(15 downto 12) === B"1100"
-  private val rEX_isBNE = rEX_instr(15 downto 12) === B"1101"
-  private val rEX_isBLT = rEX_instr(15 downto 12) === B"1110"
+  // v3.2: BR condition code rides in rEX_instr[8:7] (single-register
+  // branch; no Rt).  Formal-only reference like exRsAddrRef below.
+  private val rEX_brCC = rEX_instr(8 downto 7)
 
   // =========================================================================
   // Pipeline Registers — EX/WB
@@ -137,7 +137,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // =========================================================================
   // Register File Read Ports
   // =========================================================================
-  // Branch: Rs in [11:9], Rt in [8:6]; JMP: Rs in [11:9];
+  // v3.2 BR: single Rs in [11:9] (cond in [8:7], no Rt); JMP: Rs in [11:9];
   // ST/STB: store source in Rd field [11:9];
   // group-B immediates: Rd read in place from [11:9] (v2.1 §4.5);
   // LDB/STB: base register in [5:3] (v2.1 §4.6); others: [8:6]/[5:3].
@@ -148,8 +148,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
       decoder.io.rsReg.asBits)).asUInt
   private val idRtAddr = ((decoder.io.isST || decoder.io.isSTB) ?
     decoder.io.rdField.asBits |
-    (decoder.io.isBranch ? decoder.io.instr(8 downto 6).asBits |
-      decoder.io.rtReg.asBits)).asUInt
+    decoder.io.rtReg.asBits).asUInt
 
   regFile.io.rsAddr := rID_rsAddr
   regFile.io.rtAddr := rID_rtAddr
@@ -256,25 +255,32 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // selected BEFORE the add (the old form built two parallel adders and
   // muxed their outputs, adding a level after the carry chain).  Both forms
   // are 16-bit modular addition, so the merged expression is bit-identical.
-  private val idAddrImm = idIsByteMem ? idOffZext3 | idSext
+  // ISA v3.1: word offsets are scaled by 2 (off in words, -32..+31);
+  // the byte path (LDB/STB) is unchanged.
+  private val idWordScaled = (idSext(14 downto 0) ## B"0")
+  private val idAddrImm = idIsByteMem ? idOffZext3 | idWordScaled
   private val idEffAddr = (idFwdRsVal.asUInt + idAddrImm.asUInt).asBits
-  private val idBrShifted = idSext(14 downto 0) ## B"0"
+  private val idBrOff7 = decoder.io.instr(6 downto 0).asSInt.resize(16).asBits
+  private val idBrShifted = idBrOff7(14 downto 0) ## B"0"
   private val idBrTarget = (rID_pc.asSInt + 2 + idBrShifted.asSInt).asBits.resized
 
   // Pre-compute branch condition in ID to shorten EX critical path.
-  // Uses idFwdRsVal/idFwdRtVal, whose sources are all REGISTERS by now
-  // (LDI result, LD data in DATA_READY, WB result, regfile).  Two stalls
-  // guarantee the operands are settled before ID→EX fires:
-  // loadUseHazard for a pending LD and exIdFwdHazard for an ALU/CALL
-  // result still sitting in EX.  Stored as rEX_brTaken in the ID→EX
-  // transfer.
+  // v3.2: single Rs compared against 0 (Z/NZ) or its sign bit (MI/PL) —
+  // no Rt read, so only idFwdRsVal matters.  Uses sources that are all
+  // REGISTERS by now (LDI result, LD data in DATA_READY, WB result,
+  // regfile).  Two stalls guarantee the operand is settled before ID→EX
+  // fires: loadUseHazard for a pending LD and exIdFwdHazard for an
+  // ALU/CALL result still sitting in EX.  Stored as rEX_brTaken in the
+  // ID→EX transfer.
   // v2.1 §5.4: CALL is taken unconditionally (flush + redirect like JMP).
   private val idBrTaken =
     decoder.io.isJMP ||
     decoder.io.isCALL ||
-    (decoder.io.isBEQ && (idFwdRsVal === idFwdRtVal)) ||
-    (decoder.io.isBNE && (idFwdRsVal =/= idFwdRtVal)) ||
-    (decoder.io.isBLT && (idFwdRsVal.asSInt < idFwdRtVal.asSInt))
+    (decoder.io.isBranch &&
+      ((decoder.io.brCC === B"00" && idFwdRsVal === 0) ||
+        (decoder.io.brCC === B"01" && idFwdRsVal =/= 0) ||
+        (decoder.io.brCC === B"10" && idFwdRsVal(15)) ||
+        (decoder.io.brCC === B"11" && !idFwdRsVal(15))))
 
   // Pre-compute JMP/CALL target in ID to remove forwarding mux from EX
   // critical path.  Stored as rEX_jmpTarget in the ID→EX transfer.
@@ -336,10 +342,10 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // (LDB is an LD-type access and participates; LDI8 reads no registers.)
   private val idNeedsRs = vID && !decoder.io.isLDI && !decoder.io.isLDI8
   // rt port readers: register ALU ops (not the in-place group-B immediates,
-  // whose [5:3] field is the immediate), stores (incl. STB), branches and
-  // CALL (Rtarget in instr[5:3]).
+  // whose [5:3] field is the immediate), stores (incl. STB) and CALL
+  // (Rtarget in instr[5:3]).  v3.2: branches read no Rt.
   private val idNeedsRt = vID && (decoder.io.isALU || decoder.io.isST ||
-    decoder.io.isSTB || decoder.io.isBranch || decoder.io.isCALL) &&
+    decoder.io.isSTB || decoder.io.isCALL) &&
     !decoder.io.isImmEn && !decoder.io.isGrpBImm
   private val loadUseHazard = rEX_type === InstrType.LD && !ldRspPending && rEX_hasRd && rEX_rd =/= 0 &&
     ((idNeedsRs && rID_rsAddr === rEX_rd) || (idNeedsRt && rID_rtAddr === rEX_rd))
@@ -384,7 +390,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // ID uses these register reads COMBINATIONALLY in the same cycle and then
   // latches the result into EX, where it can no longer be re-forwarded:
   //   - effective address of LD/ST/LDB/STB   (rs)
-  //   - branch condition BEQ/BNE/BLT         (rs and rt)
+  //   - v3.2 branch condition BR cc, Rs      (rs only)
   //   - JMP / CALL target                    (rs / rt)
   // An ALU/CALL result sitting in EX is not forwarded into ID (see
   // idFwdExData — that path was the FPGA critical path), so stall ID for one
@@ -401,7 +407,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     decoder.io.isST || decoder.io.isSTB
   private val idUsesRsInId = vID && (idIsMemOp || decoder.io.isBranch ||
     decoder.io.isJMP)
-  private val idUsesRtInId = vID && (decoder.io.isBranch || decoder.io.isCALL)
+  private val idUsesRtInId = vID && decoder.io.isCALL
   private val exIdFwdHazard = ((rEX_type === InstrType.ALU ||
     rEX_type === InstrType.CALL) && rEX_hasRd && rEX_rd =/= 0) &&
     ((idUsesRsInId && rEX_rd === rID_rsAddr) ||
@@ -891,8 +897,10 @@ case class PipCore() extends Component with CoreBusIoComponent {
       exIsGrpBImm) ? rEX_instr(11 downto 9).asBits |
       (rEX_byte ? rEX_instr(5 downto 3).asBits |
         rEX_instr(8 downto 6).asBits)).asUInt
+    // v3.2: BR reads a single Rs ([11:9]); Rt is never read (the latched
+    // rEX_rtAddr falls through to instr[5:3], unused by all consumers).
     val exRtAddrRef = Mux(rEX_type === InstrType.ST, rEX_instr(11 downto 9).asUInt,
-      Mux(rEX_type === InstrType.BR, rEX_instr(8 downto 6).asUInt, rEX_instr(5 downto 3).asUInt))
+      rEX_instr(5 downto 3).asUInt)
     when(rEX_type =/= InstrType.EMPTY) {
       assert(rEX_rsAddr === exRsAddrRef)
       assert(rEX_rtAddr === exRtAddrRef)
@@ -1081,12 +1089,13 @@ case class PipCore() extends Component with CoreBusIoComponent {
       }
     }
 
-    // == Branch Condition Correctness (ISA §3.5 / §4.12–4.14)             ==
+    // == Branch Condition Correctness (v3.2: BR cc, Rs vs 0 / sign)      ==
     when(pastValid() && resetn) {
       when(rEX_type === InstrType.BR) {
-        when(rEX_isBEQ) { assert(exBrTaken === (exFwdRsVal === exFwdRtVal)) }
-        when(rEX_isBNE) { assert(exBrTaken === (exFwdRsVal =/= exFwdRtVal)) }
-        when(rEX_isBLT) { assert(exBrTaken === (exFwdRsVal.asSInt < exFwdRtVal.asSInt)) }
+        when(rEX_brCC === B"00") { assert(exBrTaken === (exFwdRsVal === 0)) }
+        when(rEX_brCC === B"01") { assert(exBrTaken === (exFwdRsVal =/= 0)) }
+        when(rEX_brCC === B"10") { assert(exBrTaken === exFwdRsVal(15)) }
+        when(rEX_brCC === B"11") { assert(exBrTaken === !exFwdRsVal(15)) }
       }
     }
 
@@ -1190,9 +1199,10 @@ case class PipCore() extends Component with CoreBusIoComponent {
     cover(rEX_byte && rEX_type === InstrType.LD)
     cover(rEX_byte && rEX_type === InstrType.ST)
     cover(rEX_type === InstrType.ALU && exIsGrpBImm)
-    cover(rEX_isBEQ && exBrTaken)
-    cover(rEX_isBNE && exBrTaken)
-    cover(rEX_isBLT && exBrTaken)
+    cover(rEX_type === InstrType.BR && rEX_brCC === B"00" && exBrTaken)
+    cover(rEX_type === InstrType.BR && rEX_brCC === B"01" && exBrTaken)
+    cover(rEX_type === InstrType.BR && rEX_brCC === B"10" && exBrTaken)
+    cover(rEX_type === InstrType.BR && rEX_brCC === B"11" && exBrTaken)
     cover(vWB && rWB_hasRd && rWB_rd =/= 0)
     cover(io.bus.ack)
     cover(io.bus.rsp.valid)

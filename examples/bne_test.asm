@@ -20,37 +20,37 @@ main:
     ADDI R7, R7, #-4
 
     ADDI R1, R0, #5
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     XOR R1, R0, R0
-    ST R1, [R6 -4]
+    ST R1, [R6 -2]
 .w1:
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .we2
-    LD R1, [R6 -4]
+    BR Z, R1, .we2
+    LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
     ADDI R7, R7, #2
     LD R2, [R7]
     SUB R1, R2, R1
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     JMP .w1
 .we2:
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
 main_epi:
     ADDI R7, R7, #4
     ADDI R7, R7, #2

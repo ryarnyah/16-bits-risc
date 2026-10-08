@@ -20,46 +20,45 @@ main:
     ADDI R7, R7, #-2
 
     XOR R1, R0, R0
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     XOR R1, R0, R0
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BNE R1, R0, .el1
+    BR NZ, R1, .el1
     ADDI R1, R0, #1
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
 .el1:
 .ei2:
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #2
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BEQ R1, R0, .el3
+    BR Z, R1, .el3
     ADDI R1, R0, #3
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
 .el3:
 .ei4:
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #5
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl7
-    JMP .el5
-.cl7:
-    LD R1, [R6 -2]
+    SLT R3, R2, R1
+    BR Z, R3, .el5
+    LD R1, [R6 -1]
     ADDI R1, R1, #7
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
 .el5:
 .ei6:
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
 main_epi:
     ADDI R7, R7, #2
     ADDI R7, R7, #2

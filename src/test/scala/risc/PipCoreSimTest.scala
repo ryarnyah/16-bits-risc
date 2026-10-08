@@ -96,43 +96,47 @@ class PipCoreSimTest extends AnyFunSuite {
   // Branches
   // ══════════════════════════════════════════════════════════════════════════
 
-  test("BEQ taken (42==42)") {
-    PipCoreSim.checkSingle("BEQ taken",
-      PipCoreSim.branchProg(PipCoreSim.BEQ, 42, 42, taken=true), PipCoreSim.PASS)
+  test("BR Z taken (0==0)") {
+    PipCoreSim.checkSingle("BR Z taken",
+      PipCoreSim.branchProg(0, 0, taken=true), PipCoreSim.PASS)
   }
-  test("BEQ not taken (42!=7)") {
-    PipCoreSim.checkSingle("BEQ ntaken",
-      PipCoreSim.branchProg(PipCoreSim.BEQ, 42, 7, taken=false), PipCoreSim.PASS)
-  }
-
-  test("BNE taken (42!=7)") {
-    PipCoreSim.checkSingle("BNE taken",
-      PipCoreSim.branchProg(PipCoreSim.BNE, 42, 7, taken=true), PipCoreSim.PASS)
-  }
-  test("BNE not taken (42==42)") {
-    PipCoreSim.checkSingle("BNE ntaken",
-      PipCoreSim.branchProg(PipCoreSim.BNE, 42, 42, taken=false), PipCoreSim.PASS)
+  test("BR Z not taken (42!=0)") {
+    PipCoreSim.checkSingle("BR Z ntaken",
+      PipCoreSim.branchProg(0, 42, taken=false), PipCoreSim.PASS)
   }
 
-  test("BLT taken (3<7)") {
-    PipCoreSim.checkSingle("BLT taken",
-      PipCoreSim.branchProg(PipCoreSim.BLT, 3, 7, taken=true), PipCoreSim.PASS)
+  test("BR NZ taken (42!=0)") {
+    PipCoreSim.checkSingle("BR NZ taken",
+      PipCoreSim.branchProg(1, 42, taken=true), PipCoreSim.PASS)
   }
-  test("BLT not taken (7<3)") {
-    PipCoreSim.checkSingle("BLT ntaken",
-      PipCoreSim.branchProg(PipCoreSim.BLT, 7, 3, taken=false), PipCoreSim.PASS)
+  test("BR NZ not taken (0==0)") {
+    PipCoreSim.checkSingle("BR NZ ntaken",
+      PipCoreSim.branchProg(1, 0, taken=false), PipCoreSim.PASS)
   }
-  test("BLT not taken (5==5)") {
-    PipCoreSim.checkSingle("BLT eq",
-      PipCoreSim.branchProg(PipCoreSim.BLT, 5, 5, taken=false), PipCoreSim.PASS)
+
+  test("BR MI taken (-3<0)") {
+    PipCoreSim.checkSingle("BR MI taken",
+      PipCoreSim.branchProg(2, -3, taken=true), PipCoreSim.PASS)
   }
-  test("BLT taken (-3<0)") {
-    PipCoreSim.checkSingle("BLT neg",
-      PipCoreSim.branchProg(PipCoreSim.BLT, -3, 0, taken=true), PipCoreSim.PASS)
+  test("BR MI not taken (3>=0)") {
+    PipCoreSim.checkSingle("BR MI ntaken",
+      PipCoreSim.branchProg(2, 3, taken=false), PipCoreSim.PASS)
   }
-  test("BLT not taken (0<-3)") {
-    PipCoreSim.checkSingle("BLT nneg",
-      PipCoreSim.branchProg(PipCoreSim.BLT, 0, -3, taken=false), PipCoreSim.PASS)
+  test("BR MI not taken (0>=0)") {
+    PipCoreSim.checkSingle("BR MI zero",
+      PipCoreSim.branchProg(2, 0, taken=false), PipCoreSim.PASS)
+  }
+  test("BR PL taken (3>=0)") {
+    PipCoreSim.checkSingle("BR PL taken",
+      PipCoreSim.branchProg(3, 3, taken=true), PipCoreSim.PASS)
+  }
+  test("BR PL taken (0>=0)") {
+    PipCoreSim.checkSingle("BR PL zero",
+      PipCoreSim.branchProg(3, 0, taken=true), PipCoreSim.PASS)
+  }
+  test("BR PL not taken (-3<0)") {
+    PipCoreSim.checkSingle("BR PL ntaken",
+      PipCoreSim.branchProg(3, -3, taken=false), PipCoreSim.PASS)
   }
 
   // ══════════════════════════════════════════════════════════════════════════

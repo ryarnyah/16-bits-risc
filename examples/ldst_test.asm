@@ -8,7 +8,8 @@
     ADDI R1, R1, #2
     ADDI R2, R2, #2
     LDI R4, #__data_init_end
-    BLT R1, R4, .init1
+    SLT R3, R1, R4
+    BR NZ, R3, .init1
     LDI R5, #_exit
     LDI R1, #main
     JMP R1
@@ -99,8 +100,8 @@ main:
     LD R2, [R7]
     ADD R1, R2, R1
     LD R1, [R1 + 0]
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
 main_epi:
     ADDI R7, R7, #2
     ADDI R7, R7, #2

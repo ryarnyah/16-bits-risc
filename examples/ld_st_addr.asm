@@ -8,7 +8,8 @@
     ADDI R1, R1, #2
     ADDI R2, R2, #2
     LDI R4, #__data_init_end
-    BLT R1, R4, .init1
+    SLT R3, R1, R4
+    BR NZ, R3, .init1
     LDI R5, #_exit
     LDI R1, #main
     JMP R1
@@ -32,19 +33,19 @@ main:
     XOR R1, R0, R0
     ST R1, [R0 +0]
     LDI R1, #0x002A
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     XOR R1, R0, R0
-    ST R1, [R6 -4]
-    LD R1, [R6 -4]
+    ST R1, [R6 -2]
+    LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
     LD R1, [R0 +0]
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
 main_epi:
     ADDI R7, R7, #4
     ADDI R7, R7, #2

@@ -410,7 +410,8 @@ class CGen:
             self.emit('    ADDI R1, R1, #2')
             self.emit('    ADDI R2, R2, #2')
             self.emit('    LDI R4, #__data_init_end')
-            self.emit(f'    BLT R1, R4, {lp}')
+            self.emit('    SLT R3, R1, R4')
+            self.emit(f'    BR NZ, R3, {lp}')
         self.emit('    LDI R5, #_exit')
         self.emit('    LDI R1, #main')
         self.emit('    JMP R1')
@@ -665,7 +666,8 @@ class CGen:
                     self.emit_lbl(m)
                 return
 
-            # Binary comparison
+            # Binary comparison (v3.2: SLT/XOR + BR cc, R3 — R2 = left,
+            # R1 = right; expression temps are dead, so R3 is free)
             self._gen_expr(cond.left)
             self.emit('    ST R1, [R7]')
             self.emit('    ADDI R7, R7, #-2')
@@ -676,56 +678,39 @@ class CGen:
 
             if op in (TOK_EQ, TOK_NE):
                 self.emit('    XOR R1, R2, R1')
-                if op == TOK_EQ:
-                    self.emit(f'    {"BNE" if invert else "BEQ"} R1, R0, {target}')
-                else:
-                    self.emit(f'    {"BEQ" if invert else "BNE"} R1, R0, {target}')
+                # jump when (EQ != invert): EQ/invert=F -> Z; EQ/T -> NZ;
+                # NE/F -> NZ; NE/T -> Z
+                cc = 'Z' if (op == TOK_EQ) != invert else 'NZ'
+                self.emit(f'    BR {cc}, R1, {target}')
                 return
 
             if op == TOK_LT:
-                # BLT R2, R1 = BLT left, right → true when left < right
-                if not invert:
-                    self.emit(f'    BLT R2, R1, {target}')
-                else:
-                    m = self.L('cl')
-                    self.emit(f'    BLT R2, R1, {m}')  # skip if left < right (true)
-                    self.emit(f'    JMP {target}')      # left >= right: go to target
-                    self.emit_lbl(m)
+                # SLT R3, R2, R1 = (left < right, signed, exact)
+                self.emit('    SLT R3, R2, R1')
+                cc = 'NZ' if not invert else 'Z'
+                self.emit(f'    BR {cc}, R3, {target}')
             elif op == TOK_GT:
-                # BLT R1, R2 = BLT right, left → true when left > right
-                if not invert:
-                    self.emit(f'    BLT R1, R2, {target}')
-                else:
-                    m = self.L('cl')
-                    self.emit(f'    BLT R1, R2, {m}')  # skip if left > right (true)
-                    self.emit(f'    JMP {target}')      # left <= right: go to target
-                    self.emit_lbl(m)
+                # SLT R3, R1, R2 = (right < left) = (left > right)
+                self.emit('    SLT R3, R1, R2')
+                cc = 'NZ' if not invert else 'Z'
+                self.emit(f'    BR {cc}, R3, {target}')
             elif op == TOK_LE:
-                # BLT R1, R2 = BLT right, left → true when left > right (false for LE)
-                if not invert:
-                    m = self.L('cl')
-                    self.emit(f'    BLT R1, R2, {m}')  # skip if left > right (false)
-                    self.emit(f'    JMP {target}')      # left <= right: go to target
-                    self.emit_lbl(m)
-                else:
-                    self.emit(f'    BLT R1, R2, {target}')  # jump when left > right (false)
+                # NOT(left > right): SLT R3, R1, R2, jump on Z
+                self.emit('    SLT R3, R1, R2')
+                cc = 'Z' if not invert else 'NZ'
+                self.emit(f'    BR {cc}, R3, {target}')
             elif op == TOK_GE:
-                # BLT R2, R1 = BLT left, right → true when left < right (false for GE)
-                if not invert:
-                    m = self.L('cg')
-                    self.emit(f'    BLT R2, R1, {m}')  # skip if left < right (false)
-                    self.emit(f'    JMP {target}')      # left >= right: go to target
-                    self.emit_lbl(m)
-                else:
-                    self.emit(f'    BLT R2, R1, {target}')  # jump when left < right (false)
-                return
+                # NOT(left < right): SLT R3, R2, R1, jump on Z
+                self.emit('    SLT R3, R2, R1')
+                cc = 'Z' if not invert else 'NZ'
+                self.emit(f'    BR {cc}, R3, {target}')
             return
 
         self._gen_expr(cond)
         if invert:
-            self.emit(f'    BEQ R1, R0, {target}')
+            self.emit(f'    BR Z, R1, {target}')
         else:
-            self.emit(f'    BNE R1, R0, {target}')
+            self.emit(f'    BR NZ, R1, {target}')
 
     # ── Expression codegen ──
 
@@ -739,15 +724,21 @@ class CGen:
             self.emit(f'    ADD R1, R1, {base}')
 
     def _emit_ld(self, base, offset):
-        if -32 <= offset <= 31:
-            self.emit(f'    LD R1, [{base} {offset:+d}]')
+        # v3.1: LD offset is in words; the frame layout uses byte offsets
+        # (always even — slots are 2 bytes), so halve them here.
+        assert offset % 2 == 0, f'odd LD byte offset {offset}'
+        w = offset // 2
+        if -32 <= w <= 31:
+            self.emit(f'    LD R1, [{base} {w:+d}]')
         else:
             self._emit_addr(base, offset)
             self.emit('    LD R1, [R1 + 0]')
 
     def _emit_st(self, base, offset, val='R1'):
-        if -32 <= offset <= 31:
-            self.emit(f'    ST {val}, [{base} {offset:+d}]')
+        assert offset % 2 == 0, f'odd ST byte offset {offset}'
+        w = offset // 2
+        if -32 <= w <= 31:
+            self.emit(f'    ST {val}, [{base} {w:+d}]')
         else:
             self.emit(f'    ST {val}, [R7]')
             self.emit('    ADDI R7, R7, #-2')
@@ -834,9 +825,9 @@ class CGen:
             end = self.L('bo')
             self._gen_expr(e.left)
             if op == TOK_LAND:
-                self.emit(f'    BEQ R1, R0, {end}')
+                self.emit(f'    BR Z, R1, {end}')
             else:
-                self.emit(f'    BNE R1, R0, {end}')
+                self.emit(f'    BR NZ, R1, {end}')
             self._gen_expr(e.right)
             self.emit_lbl(end)
             return
@@ -909,7 +900,7 @@ class CGen:
             self.emit('    XOR R3, R2, R1')
             e = self.L('ce')
             self.emit('    XOR R1, R0, R0')  # default false
-            self.emit(f'    BNE R3, R0, {e}')  # if diff != 0, skip
+            self.emit(f'    BR NZ, R3, {e}')  # if diff != 0, skip
             self.emit('    ADDI R1, R0, #1')  # diff == 0, result = 1
             self.emit_lbl(e)
             return
@@ -919,7 +910,7 @@ class CGen:
             self.emit('    XOR R3, R2, R1')
             e = self.L('ce')
             self.emit('    XOR R1, R0, R0')  # default false
-            self.emit(f'    BEQ R3, R0, {e}')  # if diff == 0, skip
+            self.emit(f'    BR Z, R3, {e}')  # if diff == 0, skip
             self.emit('    ADDI R1, R0, #1')  # diff != 0, result = 1
             self.emit_lbl(e)
             return
@@ -958,7 +949,7 @@ class CGen:
         self.emit('    ADDI R7, R7, #-2')
         self.emit(f'    LDI R5, #{ret}')
         self.emit(f'    LDI R4, #__{name}')
-        self.emit('    LD R1, [R7 +2]')
+        self.emit('    LD R1, [R7 +1]')     # v3.1: word offset (was +2 bytes)
         self.emit(f'    JMP R4')
         self.emit_lbl(ret)
         self.emit('    ADDI R7, R7, #2')
@@ -1001,7 +992,7 @@ class CGen:
             self._gen_expr(e.expr)
             t = self.L('nt')
             en = self.L('ne')
-            self.emit(f'    BEQ R1, R0, {t}')
+            self.emit(f'    BR Z, R1, {t}')
             self.emit('    XOR R1, R0, R0')
             self.emit(f'    JMP {en}')
             self.emit_lbl(t)
@@ -1178,14 +1169,14 @@ class CGen:
             self.emit('__mul_lp:')
             self.emit('    ADDI R6, R0, #1')
             self.emit('    AND R6, R1, R6')
-            self.emit('    BEQ R6, R0, __mul_sk')
+            self.emit('    BR Z, R6, __mul_sk')
             self.emit('    ADD R3, R3, R2')
             self.emit('__mul_sk:')
             self.emit('    ADDI R6, R0, #1')
             self.emit('    SLL R2, R2, R6')
             self.emit('    SRL R1, R1, R6')
             self.emit('    ADDI R4, R4, #-1')
-            self.emit('    BNE R4, R0, __mul_lp')
+            self.emit('    BR NZ, R4, __mul_lp')
             self.emit('    ADD R1, R0, R3')
             self.emit('    ADDI R7, R7, #2')
             self.emit('    LD R6, [R7]')
@@ -1194,7 +1185,7 @@ class CGen:
 
         if TOK_SLASH in rts:
             self.emit('__div16:')
-            self.emit('    BEQ R1, R0, __div_exit')
+            self.emit('    BR Z, R1, __div_exit')
             self.emit('    ST R5, [R7]')
             self.emit('    ADDI R7, R7, #-2')
             self.emit('    ST R6, [R7]')
@@ -1208,20 +1199,23 @@ class CGen:
             self.emit('    SLL R3, R3, R6')
             self.emit('    LDI R6, #0x8000')
             self.emit('    AND R6, R2, R6')
-            self.emit('    BEQ R6, R0, __div_nb')
+            self.emit('    BR Z, R6, __div_nb')
             self.emit('    ADDI R6, R0, #1')
             self.emit('    OR R5, R5, R6')
             self.emit('__div_nb:')
             self.emit('    ADDI R6, R0, #1')
             self.emit('    SLL R2, R2, R6')
-            self.emit('    SUB R6, R5, R1')
-            self.emit('    BLT R5, R1, __div_sk')
-            self.emit('    ADD R5, R0, R6')
+            # v3.2: exact signed compare via SLT (no scratch needed — the
+            # SUB result is only consumed on the not-taken path, where we
+            # recompute it directly into R5)
+            self.emit('    SLT R6, R5, R1')
+            self.emit('    BR NZ, R6, __div_sk')
+            self.emit('    SUB R5, R5, R1')
             self.emit('    ADDI R6, R0, #1')
             self.emit('    OR R3, R3, R6')
             self.emit('__div_sk:')
             self.emit('    ADDI R4, R4, #-1')
-            self.emit('    BNE R4, R0, __div_lp')
+            self.emit('    BR NZ, R4, __div_lp')
             self.emit('    ADD R1, R0, R3')
             self.emit('    ADDI R7, R7, #2')
             self.emit('    LD R6, [R7]')
@@ -1232,7 +1226,7 @@ class CGen:
 
         if TOK_PERCENT in rts:
             self.emit('__mod16:')
-            self.emit('    BEQ R1, R0, __div_exit')
+            self.emit('    BR Z, R1, __div_exit')
             self.emit('    ST R5, [R7]')
             self.emit('    ADDI R7, R7, #-2')
             self.emit('    ST R6, [R7]')
@@ -1245,18 +1239,19 @@ class CGen:
             self.emit('    SLL R5, R5, R6')
             self.emit('    LDI R6, #0x8000')
             self.emit('    AND R6, R2, R6')
-            self.emit('    BEQ R6, R0, __mod_nb')
+            self.emit('    BR Z, R6, __mod_nb')
             self.emit('    ADDI R6, R0, #1')
             self.emit('    OR R5, R5, R6')
             self.emit('__mod_nb:')
             self.emit('    ADDI R6, R0, #1')
             self.emit('    SLL R2, R2, R6')
-            self.emit('    SUB R6, R5, R1')
-            self.emit('    BLT R5, R1, __mod_sk')
-            self.emit('    ADD R5, R0, R6')
+            # v3.2: same SLT+BR+SUB shape as __div16 (see above)
+            self.emit('    SLT R6, R5, R1')
+            self.emit('    BR NZ, R6, __mod_sk')
+            self.emit('    SUB R5, R5, R1')
             self.emit('__mod_sk:')
             self.emit('    ADDI R4, R4, #-1')
-            self.emit('    BNE R4, R0, __mod_lp')
+            self.emit('    BR NZ, R4, __mod_lp')
             self.emit('    ADD R1, R0, R5')
             self.emit('    ADDI R7, R7, #2')
             self.emit('    LD R6, [R7]')

@@ -19,6 +19,10 @@
 
 ### Design Decisions
 
+- **Execution order (PLAN.md):** ISA v3 breaking changes → maintainability → speed
+- **ISA v3.2 (unified BR Z/NZ/MI/PL, ±64w, 0xD/0xE reserved):** DONE —
+  49/49 both emus, `sbt test` 35/35 (formal BMC30), PipCoreSimTest 26/26
+
 - **Package:** `risc`
 - **Bus:** 8-bit Stream cmd/rsp + ack, per INSTRUCTIONS.md
 - **Core:** Multi-cycle FSM (FETCH→DECODE→LDI_FETCH→WRITEBACK)

@@ -20,8 +20,8 @@ main:
     ADDI R7, R7, #-2
 
     LDI R1, #0x0081
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
 main_epi:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
@@ -41,14 +41,14 @@ __mul16:
 __mul_lp:
     ADDI R6, R0, #1
     AND R6, R1, R6
-    BEQ R6, R0, __mul_sk
+    BR Z, R6, __mul_sk
     ADD R3, R3, R2
 __mul_sk:
     ADDI R6, R0, #1
     SLL R2, R2, R6
     SRL R1, R1, R6
     ADDI R4, R4, #-1
-    BNE R4, R0, __mul_lp
+    BR NZ, R4, __mul_lp
     ADD R1, R0, R3
     ADDI R7, R7, #2
     LD R6, [R7]

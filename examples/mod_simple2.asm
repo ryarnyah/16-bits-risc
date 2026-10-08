@@ -20,13 +20,13 @@ main:
     ADDI R7, R7, #-4
 
     ADDI R1, R0, #7
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     ADDI R1, R0, #3
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R5, [R7]
@@ -35,7 +35,7 @@ main:
     ADDI R7, R7, #-2
     LDI R5, #.mod16_ret1
     LDI R4, #__mod16
-    LD R1, [R7 +2]
+    LD R1, [R7 +1]
     JMP R4
 .mod16_ret1:
     ADDI R7, R7, #2
@@ -53,7 +53,7 @@ main_epi:
 ; ===== Runtime Library =====
 
 __mod16:
-    BEQ R1, R0, __div_exit
+    BR Z, R1, __div_exit
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R6, [R7]
@@ -66,18 +66,18 @@ __mod_lp:
     SLL R5, R5, R6
     LDI R6, #0x8000
     AND R6, R2, R6
-    BEQ R6, R0, __mod_nb
+    BR Z, R6, __mod_nb
     ADDI R6, R0, #1
     OR R5, R5, R6
 __mod_nb:
     ADDI R6, R0, #1
     SLL R2, R2, R6
-    SUB R6, R5, R1
-    BLT R5, R1, __mod_sk
-    ADD R5, R0, R6
+    SLT R6, R5, R1
+    BR NZ, R6, __mod_sk
+    SUB R5, R5, R1
 __mod_sk:
     ADDI R4, R4, #-1
-    BNE R4, R0, __mod_lp
+    BR NZ, R4, __mod_lp
     ADD R1, R0, R5
     ADDI R7, R7, #2
     LD R6, [R7]

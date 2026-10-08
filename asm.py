@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""16-bit RISC assembler: asm -> hex word list (ISA v2.1).
+"""16-bit RISC assembler: asm -> hex word list (ISA v3.2).
+
+v3.1: LD/ST offsets are in words (-32..+31, see ISA-3.0.md).
+v3.2: unified branch BR cc, Rs, target (cc in Z/NZ/MI/PL, offset +-64
+  words); opcodes 0xD/0xE reserved; far targets use exact-inverse + jump.
 
 v2.1 notes:
   * LDI auto-selects the 1-word LDI8 form when the immediate resolves to
@@ -17,8 +21,11 @@ OPCODES = {
     "ADD":  0, "ADDI": 1, "XOR": 2, "XORI": 3,
     "SUB":  4, "AND":  5, "OR":   6, "SLL":  7,
     "SRL":  8, "LD":   9, "ST":   0xA, "JMP": 0xB,
-    "BEQ": 0xC, "BNE": 0xD, "BLT": 0xE, "LDI": 0xF,
+    "BR":  0xC, "LDI": 0xF,
 }
+
+# v3.2 branch conditions (cc field in instr[8:7])
+BRCC = {"Z": 0, "NZ": 1, "MI": 2, "PL": 3}
 
 REGS = {f"R{i}": i for i in range(8)}
 
@@ -27,13 +34,11 @@ FUNCT3 = {"SLT": (4, 1), "SLTU": (4, 2), "SRA": (8, 1)}
 # v2.1 bank B: in-place group-B immediates (cf field)
 GRPBF  = {"ANDI": 0b011, "ORI": 0b100, "SLLI": 0b101,
           "SRLI": 0b110, "SRAI": 0b111}
-# single-branch mnemonics (participate in relaxation)
-BRANCH1 = ("BEQ", "BNE", "BLT", "B", "BGT")
-# fixed 2-word (4 byte) compare-and-branch pseudos
-BRANCH2 = ("BGE", "BLE", "BLTU", "BGEU", "BLEU")
+# compare-and-branch pseudos (each expands to SLT/SLTU + BR: 2 words)
+BRANCH2 = ("BGE", "BLE", "BLTU", "BGEU", "BLEU", "BGT")
 # everything else that always assembles to exactly 1 word
 ONEWORD = ("LDI8", "CALL", "HALT", "LDB", "STB",
-           "MOV", "NEG", "NOT", "CLR", "LSL", "LSR", "ASR", "RET", "B")
+           "MOV", "NEG", "NOT", "CLR", "LSL", "LSR", "ASR", "RET", "B", "BR")
 
 def strip_hash(s):
     return s.lstrip("#")
@@ -72,8 +77,9 @@ def enc_imm(op, rd, rs, imm):
     """Immediate ALU: ADDI/XORI Rd, Rs, #imm6 (sign-extended by core)."""
     return (op << 12) | (rd << 9) | (rs << 6) | (imm & 0x3F)
 
-def enc_branch(op, rs, rt, off):
-    return (op << 12) | (rs << 9) | (rt << 6) | (off & 0x3F)
+def enc_br(cc, rs, off):
+    """v3.2 unified branch: BR cc, Rs, off7 (1100 | Rs | cc | off7)."""
+    return (0xC << 12) | (rs << 9) | (cc << 7) | (off & 0x7F)
 
 def enc_grpb(cf, rd, imm):
     """Group-B immediate: ANDI/ORI/SLLI/SRLI/SRAI Rd, #imm6 (zext)."""
@@ -116,26 +122,27 @@ def expand(m, args, scratch):
     if m == "ASR":
         return [("SRA", args)]
     if m == "B":
-        return [("BEQ", ["R0", "R0", args[0]])]
-    if m == "BGT":
-        return [("BLT", [args[1], args[0], args[2]])]
+        return [("BR", ["Z", "R0", args[0]])]
+    if m == "BGT":   # SLT tmp,Rt,Rs ; BR NZ,tmp,L  (Rs > Rt)
+        t = f"R{scratch}"
+        return [("SLT", [t, args[1], args[0]]), ("BR", ["NZ", t, args[2]])]
     if m == "RET":
         return [("JMP", [args[0] if args else "R5"])]
-    if m == "BGE":    # SLT tmp,Rs,Rt ; BEQ tmp,R0,L
+    if m == "BGE":    # SLT tmp,Rs,Rt ; BR Z,tmp,L
         t = f"R{scratch}"
-        return [("SLT", [t, args[0], args[1]]), ("BEQ", [t, "R0", args[2]])]
-    if m == "BLE":    # SLT tmp,Rt,Rs ; BEQ tmp,R0,L
+        return [("SLT", [t, args[0], args[1]]), ("BR", ["Z", t, args[2]])]
+    if m == "BLE":    # SLT tmp,Rt,Rs ; BR Z,tmp,L
         t = f"R{scratch}"
-        return [("SLT", [t, args[1], args[0]]), ("BEQ", [t, "R0", args[2]])]
-    if m == "BLTU":   # SLTU tmp,Rs,Rt ; BNE tmp,R0,L
+        return [("SLT", [t, args[1], args[0]]), ("BR", ["Z", t, args[2]])]
+    if m == "BLTU":   # SLTU tmp,Rs,Rt ; BR NZ,tmp,L
         t = f"R{scratch}"
-        return [("SLTU", [t, args[0], args[1]]), ("BNE", [t, "R0", args[2]])]
-    if m == "BGEU":   # SLTU tmp,Rs,Rt ; BEQ tmp,R0,L
+        return [("SLTU", [t, args[0], args[1]]), ("BR", ["NZ", t, args[2]])]
+    if m == "BGEU":   # SLTU tmp,Rs,Rt ; BR Z,tmp,L
         t = f"R{scratch}"
-        return [("SLTU", [t, args[0], args[1]]), ("BEQ", [t, "R0", args[2]])]
-    if m == "BLEU":   # SLTU tmp,Rt,Rs ; BEQ tmp,R0,L
+        return [("SLTU", [t, args[0], args[1]]), ("BR", ["Z", t, args[2]])]
+    if m == "BLEU":   # SLTU tmp,Rt,Rs ; BR Z,tmp,L
         t = f"R{scratch}"
-        return [("SLTU", [t, args[1], args[0]]), ("BEQ", [t, "R0", args[2]])]
+        return [("SLTU", [t, args[1], args[0]]), ("BR", ["Z", t, args[2]])]
     if m in GRPBF and len(args) == 3:
         # 3-op form: ANDI Rd, Rs, #imm -> ADD Rd, Rs, R0 + ANDI Rd, #imm
         # (copy skipped when Rs == Rd, the natural in-place form)
@@ -146,12 +153,15 @@ def expand(m, args, scratch):
     return [(m, args)]
 
 # ---------------------------------------------------------------------------
-# Sizes / labels / relaxation / LDI narrowing (layout fixpoint)
+# Sizes / labels / relaxation / LDI narrowing (layout fixpoint).
+# v3.2 relaxation is minimal: an out-of-range BR (±64) becomes
+#   BR invcc, Rs, +3 ; LDI R4, #target ; JMP R4   (4 words, exact inverse)
+# No special cases — all four conditions invert exactly (Z<->NZ, MI<->PL).
 # ---------------------------------------------------------------------------
 
 def instr_size(toks, relaxed, narrow, jmp_narrow, line_no):
-    """Return instruction size in bytes.  relaxed = branch lines expanded to
-       8 bytes; narrow = LDI lines using the 1-word LDI8 form; jmp_narrow =
+    """Return instruction size in bytes.  relaxed = BR lines expanded to
+       4 words; narrow = LDI lines using the 1-word LDI8 form; jmp_narrow =
        JMP-label lines whose label fits the 1-word constant load."""
     if not toks:
         return 0
@@ -168,20 +178,18 @@ def instr_size(toks, relaxed, narrow, jmp_narrow, line_no):
         return 2
     if m == "JMP" and len(args) >= 1 and args[0] not in REGS:
         return 4 if line_no in jmp_narrow else 6
-    if m in BRANCH1 and line_no in relaxed:
-        # Inverted condition + LDI/JMP (4 words).  BLT (and BGT, which
-        # expands to a swapped BLT) needs an extra BEQ for the equality
-        # case -> 5 words.
-        return 10 if m in ("BLT", "BGT") else 8
+    if m in ("BR", "B") and line_no in relaxed:
+        # Far branch: exact-inverse skip + absolute jump (4 words).
+        return 8
     if m in BRANCH2:
-        # SLT/SLTU tmp + branch; a relaxed line escapes via LDI/JMP.
+        # SLT/SLTU tmp + BR: 2 words, or 2 + 8 relaxed.
         return 10 if line_no in relaxed else 4
     if m in GRPBF:
         # 3-op form with Rs != Rd needs the copy instruction
         if len(args) >= 3 and args[1] in REGS and args[1] != args[0]:
             return 4
         return 2
-    if m in OPCODES or m in ONEWORD or m in FUNCT3 or m in BRANCH1:
+    if m in OPCODES or m in ONEWORD or m in FUNCT3:
         return 2
     return 0
 
@@ -199,9 +207,11 @@ def compute_labels(lines, relaxed, narrow, jmp_narrow):
     return labels
 
 def compute_relaxed(lines, relaxed, narrow, jmp_narrow):
-    """Monotonically grow `relaxed` until every branch whose target lies
-       outside the +/-32-word range is expanded.  Iterates to a fixed point
-       because expanding a branch changes addresses of the others."""
+    """Grow `relaxed` until every BR whose target lies outside +-64 words
+       uses the 4-word far form.  Iterates to a fixed point because
+       expanding a branch moves the others.  Each EMITTED branch is checked
+       at its own address (BRANCH2 pseudos emit SLT first, so their BR
+       sits 2 bytes later)."""
     relaxed = set(relaxed)
     while True:
         labels = compute_labels(lines, relaxed, narrow, jmp_narrow)
@@ -217,17 +227,11 @@ def compute_relaxed(lines, relaxed, narrow, jmp_narrow):
             if toks and not toks[0].startswith("."):
                 m = toks[0]
                 args = get_args(toks)
-                ops = expand(m, args, 4)
-                # Check EVERY emitted branch at its own address: BRANCH2
-                # pseudos emit SLT/SLTU first, so their branch sits 2 bytes
-                # later.  (Previously only ops[0] was inspected, which left
-                # far BGE/BLE/BLTU/BGEU/BLEU unrelaxed -> their branch
-                # offset was silently truncated to 6 bits.)
                 a = addr
-                for mn, ar in ops:
-                    if mn in ("BEQ", "BNE", "BLT") and len(ar) >= 3 and ar[2] in labels:
+                for mn, ar in expand(m, args, 4):
+                    if mn == "BR" and len(ar) >= 3 and ar[2] in labels:
                         off = (labels[ar[2]] - a - 2) // 2
-                        if off < -32 or off > 31:
+                        if off < -64 or off > 63:
                             if i not in relaxed:
                                 relaxed.add(i)
                                 changed = True
@@ -266,7 +270,9 @@ def compute_narrow(lines, labels):
     return narrow, jmp_narrow
 
 def solve_layout(lines, max_iter=64):
-    """Joint fixed point over (relaxation, LDI narrowing, label addresses)."""
+    """Joint fixed point over (relaxation, LDI narrowing, label addresses).
+       Relaxation only triggers past +-64 words (rare); narrowing converges
+       as before."""
     relaxed, narrow, jmp_narrow = set(), set(), set()
     for _ in range(max_iter):
         relaxed = compute_relaxed(lines, relaxed, narrow, jmp_narrow)
@@ -303,43 +309,28 @@ def emit(output, addr, m, args, labels, relaxed, narrow, jmp_narrow, line_no):
         output.append((addr + 4, (0xB << 12) | (4 << 9)))
         return addr + 6
 
-    if m in ("BEQ", "BNE", "BLT"):
-        op = {"BEQ": 0xC, "BNE": 0xD, "BLT": 0xE}[m]
-        rs = REGS[args[0]]
-        rt = REGS[args[1]]
+    if m == "BR":
+        cc = BRCC[args[0]]
+        rs = REGS[args[1]]
         if args[2] in labels:
             off = (labels[args[2]] - addr - 2) // 2
         else:
             off = parse_num(args[2])
         if line_no in relaxed:
-            # Inverted condition jumps over LDI R4, #label / JMP R4.
-            # BEQ->BNE and BNE->BEQ are exact inverses.  BLT (and BGT,
-            # which expands to a swapped BLT) cannot be inverted by
-            # swapping operands alone: NOT(rs < rt) = rs >= rt, but the
-            # swapped BLT encodes only rs > rt — with EQUAL operands it
-            # fell into the LDI/JMP and jumped instead of falling
-            # through.  Skip on equality with an extra BEQ (5 words).
+            # Far form: exact-inverse skip over LDI R4,#target / JMP R4.
+            # All four conditions invert exactly, so no equality special
+            # case is needed (the v2.1 BLT bug class cannot occur).
+            inv = {"Z": "NZ", "NZ": "Z", "MI": "PL", "PL": "MI"}[args[0]]
             target = resolve(args[2], labels)
-            if op == 0xE:
-                output.append((addr, enc_branch(0xC, rs, rt, 4)))
-                output.append((addr + 2, enc_branch(0xE, rt, rs, 3)))
-                output.append((addr + 4, ((0xF << 12) | (4 << 9)) & 0xFFFF))
-                output.append((addr + 6, target & 0xFFFF))
-                output.append((addr + 8, (0xB << 12) | (4 << 9)))
-                return addr + 10
-            if op == 0xC:
-                opp = enc_branch(0xD, rs, rt, 3)
-            else:
-                opp = enc_branch(0xC, rs, rt, 3)
-            output.append((addr, opp))
+            output.append((addr, enc_br(BRCC[inv], rs, 3)))
             output.append((addr + 2, ((0xF << 12) | (4 << 9)) & 0xFFFF))
             output.append((addr + 4, target & 0xFFFF))
             output.append((addr + 6, (0xB << 12) | (4 << 9)))
             return addr + 8
-        if off < -32 or off > 31:
-            print(f"Warning: branch at byte {addr} offset {off} exceeds ±32 range",
+        if off < -64 or off > 63:
+            print(f"Warning: BR at byte {addr} offset {off} exceeds +-64 range",
                   file=sys.stderr)
-        output.append((addr, enc_branch(op, rs, rt, off)))
+        output.append((addr, enc_br(cc, rs, off)))
         return addr + 2
 
     if m in FUNCT3:                      # SLT / SLTU / SRA
@@ -374,11 +365,14 @@ def emit(output, addr, m, args, labels, relaxed, narrow, jmp_narrow, line_no):
         output.append((addr, enc_ldstb(1 if m == "LDB" else 2, rd, rs, off)))
         return addr + 2
 
-    if m in ("LD", "ST"):                # word LD/ST Rd, [Rs + off6]
+    if m in ("LD", "ST"):                # v3.1 word LD/ST Rd, [Rs + off] (off in WORDS)
         op = OPCODES[m]
         rd = REGS[args[0]]
         rs = REGS[args[1]]
         off = parse_num(args[2]) if len(args) > 2 else 0
+        if off < -32 or off > 31:
+            print(f"Warning: {m} offset {off} exceeds -32..+31 words (v3.1)",
+                  file=sys.stderr)
         output.append((addr, (op << 12) | (rd << 9) | (rs << 6) | (off & 0x3F)))
         return addr + 2
 

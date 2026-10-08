@@ -20,36 +20,36 @@ main:
     ADDI R7, R7, #-12
 
     ADDI R1, R0, #3
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
+    ADDI R1, R1, #5
     ST R1, [R6 -2]
     LD R1, [R6 -2]
-    ADDI R1, R1, #5
-    ST R1, [R6 -4]
-    LD R1, [R6 -4]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ANDI R1, R1, #7
-    ST R1, [R6 -8]
-    LD R1, [R6 -8]
+    ST R1, [R6 -4]
+    LD R1, [R6 -4]
     ORI R1, R1, #1
-    ST R1, [R6 -10]
-    LD R1, [R6 -10]
+    ST R1, [R6 -5]
+    LD R1, [R6 -5]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -6]
+    LD R1, [R6 -3]
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R6 -12]
-    LD R1, [R6 -12]
+    ST R1, [R6 -6]
+    LD R1, [R6 -6]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ADDI R7, R7, #2
     LD R2, [R7]
     SUB R1, R2, R1

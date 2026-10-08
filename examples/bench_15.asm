@@ -21,29 +21,22 @@ main:
     ADD R7, R7, R2
 
     XOR R1, R0, R0
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    LDI R1, #-34
-    ADD R1, R1, R6
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    ST R2, [R1 + 0]
+    ST R1, [R6 -17]
     XOR R1, R0, R0
-    ST R1, [R6 -32]
+    ST R1, [R6 -16]
 .fc1:
-    LD R1, [R6 -32]
+    LD R1, [R6 -16]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #15
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl4
-    JMP .fe3
-.cl4:
+    SLT R3, R2, R1
+    BR Z, R3, .fe3
     ADDI R1, R6, #-30
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -32]
+    LD R1, [R6 -16]
     ADDI R3, R0, #1
     SLL R1, R1, R3
     ADDI R7, R7, #2
@@ -51,37 +44,34 @@ main:
     ADD R1, R2, R1
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -32]
+    LD R1, [R6 -16]
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R1, [R2 + 0]
 .fi2:
-    LD R1, [R6 -32]
+    LD R1, [R6 -16]
     ADDI R2, R1, #1
-    ST R2, [R6 -32]
+    ST R2, [R6 -16]
     JMP .fc1
 .fe3:
     XOR R1, R0, R0
-    ST R1, [R6 -32]
-.fc5:
-    LD R1, [R6 -32]
+    ST R1, [R6 -16]
+.fc4:
+    LD R1, [R6 -16]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #15
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl8
-    JMP .fe7
-.cl8:
-    LDI R1, #-34
-    ADD R1, R1, R6
-    LD R1, [R1 + 0]
+    SLT R3, R2, R1
+    BR Z, R3, .fe6
+    LD R1, [R6 -17]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R6, #-30
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -32]
+    LD R1, [R6 -16]
     ADDI R3, R0, #1
     SLL R1, R1, R3
     ADDI R7, R7, #2
@@ -91,22 +81,14 @@ main:
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    LDI R1, #-34
-    ADD R1, R1, R6
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    ST R2, [R1 + 0]
-.fi6:
-    LD R1, [R6 -32]
+    ST R1, [R6 -17]
+.fi5:
+    LD R1, [R6 -16]
     ADDI R2, R1, #1
-    ST R2, [R6 -32]
-    JMP .fc5
-.fe7:
-    LDI R1, #-34
-    ADD R1, R1, R6
-    LD R1, [R1 + 0]
+    ST R2, [R6 -16]
+    JMP .fc4
+.fe6:
+    LD R1, [R6 -17]
 main_epi:
     LDI R2, #34
     ADD R7, R7, R2

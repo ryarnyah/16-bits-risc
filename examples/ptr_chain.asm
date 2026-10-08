@@ -20,10 +20,10 @@ main:
     ADDI R7, R7, #-4
 
     LDI R1, #0x002A
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     ADDI R1, R6, #-2
-    ST R1, [R6 -4]
-    LD R1, [R6 -4]
+    ST R1, [R6 -2]
+    LD R1, [R6 -2]
     LD R1, [R1 + 0]
 main_epi:
     ADDI R7, R7, #4

@@ -18,9 +18,9 @@ callee:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-2
-    ST R2, [R6 -2]
+    ST R2, [R6 -1]
 
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ADDI R1, R1, #1
 callee_epi:
     ADDI R7, R7, #2
@@ -49,8 +49,8 @@ main:
     LDI R1, #callee
     JMP R1
 .cr1:
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
 main_epi:
     ADDI R7, R7, #2
     ADDI R7, R7, #2

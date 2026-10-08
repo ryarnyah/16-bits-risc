@@ -7,7 +7,8 @@ loop:
     XORI R3, R3, #0
     ; branch back if R3 < 10
     LDI R2, #10
-    BLT  R3, R2, loop
+    SLT R4, R3, R2
+    BR  NZ, R4, loop
     ; reset counter and repeat
     LDI R3, #0
     JMP R1

@@ -19,13 +19,13 @@ os.chdir(HERE)
 
 import run_tests, asm
 
-# Full hardware instruction set (ISA v2.1)
+# Full hardware instruction set (ISA v3.2: BR replaces BEQ/BNE/BLT)
 HW = (set(asm.OPCODES) | set(asm.FUNCT3) | set(asm.GRPBF) |
       {"LDI8", "CALL", "HALT", "LDB", "STB"})
 HW_ORDER = ["ADD", "ADDI", "XOR", "XORI", "SUB", "SLT", "SLTU", "AND", "OR",
             "SLL", "SRL", "SRA", "LD", "ST", "JMP", "CALL", "HALT",
             "ANDI", "ORI", "SLLI", "SRLI", "SRAI",
-            "BEQ", "BNE", "BLT", "LDI", "LDI8", "LDB", "STB"]
+            "BR", "LDI", "LDI8", "LDB", "STB"]
 
 PSEUDO = {"MOV", "NEG", "NOT", "CLR", "LSL", "LSR", "ASR",
           "B", "BGT", "BGE", "BLE", "BLTU", "BGEU", "BLEU", "RET"}

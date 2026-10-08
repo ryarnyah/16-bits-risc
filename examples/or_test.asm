@@ -20,13 +20,13 @@ main:
     ADDI R7, R7, #-4
 
     LDI R1, #0x0F00
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     LDI R1, #0x00A5
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     OR R1, R2, R1

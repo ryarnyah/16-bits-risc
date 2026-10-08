@@ -19,11 +19,11 @@ import scala.language.postfixOps
  *   [5:0]   imm6    — 6-bit immediate/offset (overlaps Rt)
  * }}}
  *
- * == Opcode map (unchanged from v2.0) ==
+ * == Opcode map (v3.2) ==
  * {{{
- *   0x0 : ADD    0x4 : SUB    0x8 : SRL    0xC : BEQ
- *   0x1 : ADDI  0x5 : AND    0x9 : LD     0xD : BNE
- *   0x2 : XOR   0x6 : OR     0xA : ST     0xE : BLT
+ *   0x0 : ADD    0x4 : SUB    0x8 : SRL    0xC : BR (v3.2, cond in [8:7])
+ *   0x1 : ADDI  0x5 : AND    0x9 : LD     0xD : reserved (v3.2, was BNE)
+ *   0x2 : XOR   0x6 : OR     0xA : ST     0xE : reserved (v3.2, was BLT)
  *   0x3 : XORI  0x7 : SLL    0xB : JMP+gB 0xF : LDI+gF
  * }}}
  *
@@ -60,15 +60,13 @@ case class DecoderIo() extends Bundle {
   val isST: Bool = out Bool ()
   /** True when instruction is JMP (cf=000, payload=0). */
   val isJMP: Bool = out Bool ()
-  /** True when instruction is BEQ (branch if equal, opcode 0xC). */
-  val isBEQ: Bool = out Bool ()
-  /** True when instruction is BNE (branch if not equal, opcode 0xD). */
-  val isBNE: Bool = out Bool ()
-  /** True when instruction is BLT (branch if less than, opcode 0xE). */
-  val isBLT: Bool = out Bool ()
+  /** True when instruction is BR (v3.2 single-register branch, opcode 0xC). */
+  val isBR: Bool = out Bool ()
+  /** Branch condition (v3.2, mirrors instr[8:7]): 00=Z, 01=NZ, 10=MI, 11=PL. */
+  val brCC: Bits = out Bits (2 bits)
   /** True when instruction is the 2-word LDI (v2.0 form). */
   val isLDI: Bool = out Bool ()
-  /** True when instruction is any branch (BEQ/BNE/BLT). */
+  /** True when instruction is a branch (== isBR since v3.2). */
   val isBranch: Bool = out Bool ()
   /** True when instruction uses immediate format (ADDI opcode 0x1, XORI opcode 0x3);
     * operand B is the sign-extended imm6. */
@@ -139,10 +137,10 @@ case class Decoder() extends Component {
   // ── v2.0 groups ────────────────────────────────────────────────────
   io.isLD  := opc === B"1001"
   io.isST  := opc === B"1010"
-  io.isBEQ := opc === B"1100"
-  io.isBNE := opc === B"1101"
-  io.isBLT := opc === B"1110"
-  io.isBranch := io.isBEQ || io.isBNE || io.isBLT
+  // v3.2: single branch opcode 0xC (cond in [8:7]); 0xD/0xE are reserved.
+  io.isBR := opc === B"1100"
+  io.brCC := io.instr(8 downto 7)
+  io.isBranch := io.isBR
 
   // ── Bank B: group 0xB ──────────────────────────────────────────────
   io.isJMP := (opc === B"1011") && (cf === B"000") && (payload === B"000000")
@@ -157,11 +155,12 @@ case class Decoder() extends Component {
   io.isLDB := (opc === B"1111") && !b8 && (mf === B"01")
   io.isSTB := (opc === B"1111") && !b8 && (mf === B"10")
 
-  // ── Reserved = NOP (ISA v2.1 §2.6) ─────────────────────────────────
+  // ── Reserved = NOP (ISA v2.1 §2.6; v3.2 adds freed 0xD/0xE) ─────────
   io.isReserved :=
     ((opcU <= 8) && !bankAValid) ||
     ((opc === B"1011") && !(io.isJMP || io.isCALL || io.isHALT || io.isGrpBImm)) ||
-    ((opc === B"1111") && !(io.isLDI || io.isLDI8 || io.isLDB || io.isSTB))
+    ((opc === B"1111") && !(io.isLDI || io.isLDI8 || io.isLDB || io.isSTB)) ||
+    (opc === B"1101") || (opc === B"1110")
 
   // ── Aggregate classes ──────────────────────────────────────────────
   io.isALU := baseAlu || io.isGrpBImm
@@ -194,7 +193,7 @@ case class Decoder() extends Component {
   // Formal Verification — covers the following test cases:
   //   TC-DEC-1: isALU true iff opcode 0–8 with valid funct3, or group-B imm
   //   TC-DEC-2: Each opcode group correctly decoded (LD=0x9, ST=0xA,
-  //             JMP=0xB/cf0, BEQ/BNE/BLT, LDI=0xF/2-word)
+  //             JMP=0xB/cf0, BR=0xC, 0xD/0xE reserved, LDI=0xF/2-word)
   //   TC-DEC-3: isImmEn true for ADDI (0x1) and XORI (0x3) only
   //   TC-DEC-4: hasRd matches ALU || LD || LDI || LDI8 || LDB || CALL
   //   TC-DEC-5: Field extraction (rdField, rsReg, rtReg, imm6) matches bits
@@ -217,15 +216,17 @@ case class Decoder() extends Component {
     when(io.isGrpBImm) { assert(io.isALU) }
     when((opcU > 8) && !io.isGrpBImm) { assert(!io.isALU) }
 
-    /* TC-DEC-2: Per-opcode group detection */
+    /* TC-DEC-2: Per-opcode group detection (v3.2: single branch 0xC) */
     when(opc === B"1001") { assert(io.isLD);  assert(!io.isST) }
     when(opc === B"1010") { assert(io.isST);  assert(!io.isLD) }
     when(opc === B"1011") { assert(!io.isBranch) }
-    when(opc === B"1100") { assert(io.isBEQ); assert(io.isBranch) }
-    when(opc === B"1101") { assert(io.isBNE); assert(io.isBranch) }
-    when(opc === B"1110") { assert(io.isBLT); assert(io.isBranch) }
+    when(opc === B"1100") { assert(io.isBR); assert(io.isBranch); assert(!io.isReserved) }
+    when(opc === B"1101") { assert(io.isReserved); assert(!io.isBranch) }
+    when(opc === B"1110") { assert(io.isReserved); assert(!io.isBranch) }
     when(opc === B"1111") { assert(!io.isALU) }
     when(io.isLDI) { assert(opc === B"1111"); assert(!io.isLDI8) }
+    /* v3.2: branch condition mirrors instr[8:7] */
+    assert(io.brCC === io.instr(8 downto 7))
 
     /* TC-DEC-3: Immediate-format detection */
     when(opc === B"0001" || opc === B"0011") {

@@ -89,29 +89,30 @@ case class Core() extends Component with CoreBusIoComponent {
   alu.io.aluFunc := decoder.io.aluFunc
 
   // === Load/store effective address ===
-  // ISA §3.3 / v2.1 §4.3: word access = Rs + sext(off6); byte access
-  // (LDB/STB, v2.1 §4.6) = Rs + zext(off3).  Bit 0 of a word address is
-  // ignored by the SoC (deterministic aliasing, v2.1 §2.3).
+  // ISA v3.1: word access = Rs + sext(off6)*2 (off in words, -32..+31);
+  // byte access (LDB/STB, v2.1 §4.6) = Rs + zext(off3).  Odd word addresses
+  // are impossible by construction (off*2 is even), so the v2.1 §2.3
+  // bit-0-ignored aliasing rule is gone.
   private val offZext3 = B(0, 13 bits) ## decoder.io.instr(2 downto 0)
+  private val offScaled = (sextVal.asUInt << 1).resize(16)
   private val effAddr = Mux(isByteMem,
     (regFile.io.rsVal.asUInt + offZext3.asUInt).asBits,
-    (regFile.io.rsVal.asSInt + sextVal.asSInt).asBits.resized)
+    (regFile.io.rsVal.asUInt + offScaled).asBits.resized)
 
   // === Register file ===
-  // Branch (BEQ/BNE/BLT):   Rs in instr[11:9], Rt in instr[8:6]   (ISA §3.4)
-  // JMP:                    Rs in instr[11:9]                       (ISA §3.5)
-  // ST/STB:                 store source in rdField instr[11:9]     (ISA §3.3)
-  // Group-B immediates:     Rd read in place from instr[11:9]       (v2.1 §4.5)
-  // LDB/STB:                base Rs in instr[5:3]                   (v2.1 §4.6)
-  // All others:             Rs in instr[8:6],  Rt in instr[5:3]
+  // v3.2 BR:                  single Rs in instr[11:9], no Rt (cond in [8:7])
+  // JMP:                      Rs in instr[11:9]                       (ISA §3.5)
+  // ST/STB:                   store source in rdField instr[11:9]     (ISA §3.3)
+  // Group-B immediates:       Rd read in place from instr[11:9]       (v2.1 §4.5)
+  // LDB/STB:                  base Rs in instr[5:3]                   (v2.1 §4.6)
+  // All others:               Rs in instr[8:6],  Rt in instr[5:3]
   private val rsAddr = ((decoder.io.isBranch || decoder.io.isJMP ||
     decoder.io.isGrpBImm) ? decoder.io.instr(11 downto 9).asBits |
     (isByteMem ? decoder.io.instr(5 downto 3).asBits |
       decoder.io.rsReg.asBits)).asUInt
   private val rtAddr = ((decoder.io.isST || decoder.io.isSTB) ?
     decoder.io.rdField.asBits |
-    (decoder.io.isBranch ? decoder.io.instr(8 downto 6).asBits |
-      decoder.io.rtReg.asBits)).asUInt
+    decoder.io.rtReg.asBits).asUInt
 
   regFile.io.rsAddr := rsAddr
   regFile.io.rtAddr := rtAddr
@@ -137,14 +138,18 @@ case class Core() extends Component with CoreBusIoComponent {
   io.dbgRegFile1 := regFile.io.auxVal
 
   // === Branch target ===
-  // ISA §3.4: Offset is in instructions (×2 for byte address)
-  private val brShifted = sextVal(14 downto 0) ## B"0"
+  // ISA v3.2: BR offset is instr[6:0] (words, ±64), added to the already-
+  // incremented PC.  Same shift pattern as the word-scaled LD/ST offset.
+  private val brOff7 = decoder.io.instr(6 downto 0).asSInt.resize(16).asBits
+  private val brShifted = brOff7(14 downto 0) ## B"0"
   private val brTarget = (PC.asSInt + brShifted.asSInt).asBits.resized
 
-  // === Branch condition evaluation ===
-  private val brTaken = (decoder.io.isBEQ && (regFile.io.rsVal === regFile.io.rtVal)) ||
-                (decoder.io.isBNE && (regFile.io.rsVal =/= regFile.io.rtVal)) ||
-                (decoder.io.isBLT && (regFile.io.rsVal.asSInt < regFile.io.rtVal.asSInt))
+  // === Branch condition evaluation (v3.2: single Rs vs 0 / sign bit) ===
+  private val brTaken = decoder.io.isBranch && (
+    (decoder.io.brCC === B"00" && regFile.io.rsVal === 0) ||
+    (decoder.io.brCC === B"01" && regFile.io.rsVal =/= 0) ||
+    (decoder.io.brCC === B"10" && regFile.io.rsVal(15)) ||
+    (decoder.io.brCC === B"11" && !regFile.io.rsVal(15)))
 
   // === ST data (from rdField via rtAddr override) ===
   private val stVal = regFile.io.rtVal

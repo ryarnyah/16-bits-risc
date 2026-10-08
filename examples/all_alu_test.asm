@@ -20,56 +20,56 @@ main:
     ADDI R7, R7, #-6
 
     LDI R1, #0x0F0F
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     LDI R1, #0x00FF
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ADDI R7, R7, #2
     LD R2, [R7]
     SUB R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    LD R1, [R6 -1]
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    AND R1, R2, R1
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     ST R1, [R7]
     ADDI R7, R7, #-2
     LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
-    AND R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    LD R1, [R6 -4]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     OR R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     SLLI R1, R1, #2
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     SRAI R1, R1, #1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
 main_epi:
     ADDI R7, R7, #6
     ADDI R7, R7, #2

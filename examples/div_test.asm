@@ -30,7 +30,7 @@ main_epi:
 ; ===== Runtime Library =====
 
 __div16:
-    BEQ R1, R0, __div_exit
+    BR Z, R1, __div_exit
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R6, [R7]
@@ -44,20 +44,20 @@ __div_lp:
     SLL R3, R3, R6
     LDI R6, #0x8000
     AND R6, R2, R6
-    BEQ R6, R0, __div_nb
+    BR Z, R6, __div_nb
     ADDI R6, R0, #1
     OR R5, R5, R6
 __div_nb:
     ADDI R6, R0, #1
     SLL R2, R2, R6
-    SUB R6, R5, R1
-    BLT R5, R1, __div_sk
-    ADD R5, R0, R6
+    SLT R6, R5, R1
+    BR NZ, R6, __div_sk
+    SUB R5, R5, R1
     ADDI R6, R0, #1
     OR R3, R3, R6
 __div_sk:
     ADDI R4, R4, #-1
-    BNE R4, R0, __div_lp
+    BR NZ, R4, __div_lp
     ADD R1, R0, R3
     ADDI R7, R7, #2
     LD R6, [R7]

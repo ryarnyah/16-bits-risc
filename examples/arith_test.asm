@@ -20,18 +20,18 @@ main:
     ADDI R7, R7, #-6
 
     ADDI R1, R0, #1
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     ADDI R1, R0, #2
-    ST R1, [R6 -4]
-    LD R1, [R6 -2]
+    ST R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
 main_epi:
     ADDI R7, R7, #6
     ADDI R7, R7, #2

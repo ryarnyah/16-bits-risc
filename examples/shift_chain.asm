@@ -20,14 +20,14 @@ main:
     ADDI R7, R7, #-6
 
     ADDI R1, R0, #3
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
+    SLLI R1, R1, #1
     ST R1, [R6 -2]
     LD R1, [R6 -2]
-    SLLI R1, R1, #1
-    ST R1, [R6 -4]
-    LD R1, [R6 -4]
     SRAI R1, R1, #1
-    ST R1, [R6 -6]
-    LD R1, [R6 -6]
+    ST R1, [R6 -3]
+    LD R1, [R6 -3]
     SLLI R1, R1, #2
 main_epi:
     ADDI R7, R7, #6

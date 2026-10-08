@@ -50,13 +50,13 @@ object PipCoreSim {
   def LD  (rd: Int, rs: Int, off: Int): Int = (0x9<<12)|(rd<<9)|(rs<<6)|(off&0x3F)
   def ST  (rt: Int, rs: Int, off: Int): Int = (0xA<<12)|(rt<<9)|(rs<<6)|(off&0x3F)
   def JMP (rs: Int): Int = (0xB<<12)|(rs<<9)
-  def BEQ (rs: Int, rt: Int, off: Int): Int = (0xC<<12)|(rs<<9)|(rt<<6)|(off&0x3F)
-  def BNE (rs: Int, rt: Int, off: Int): Int = (0xD<<12)|(rs<<9)|(rt<<6)|(off&0x3F)
-  def BLT (rs: Int, rt: Int, off: Int): Int = (0xE<<12)|(rs<<9)|(rt<<6)|(off&0x3F)
+  // v3.2 unified branch: BR cc, Rs, off — 1100 | Rs | cc | off7
+  // cc: 0=Z (Rs==0), 1=NZ, 2=MI (Rs<0 signed), 3=PL (Rs>=0 signed)
+  def BR  (cc: Int, rs: Int, off: Int): Int = (0xC<<12)|(rs<<9)|(cc<<7)|(off&0x7F)
   def LDI (rd: Int): Int = (0xF<<12)|(rd<<9)
 
   def imm16(v: Int): Int = v & 0xFFFF
-  val INF_LOOP: Int = BEQ(0, 0, -2)
+  val INF_LOOP: Int = BR(0, 0, -2)
   val PASS = 0x5A5A
   val FAIL = 0x0BAD
 
@@ -115,19 +115,19 @@ object PipCoreSim {
   )
 
   // ═════════════════════════════════════════════════════════════════════════
-  // Branch program builder
+  // Branch program builder (v3.2: single Rs tested against 0 / sign bit)
   // ═════════════════════════════════════════════════════════════════════════
 
   def branchProg(
-    branch: (Int, Int, Int) => Int,
-    rs: Int, rt: Int,
+    cc: Int,
+    rs: Int,
     taken: Boolean
   ): Seq[Int] = {
-    val off = brOff(4, 9)
+    val off = brOff(2, 7)
     val (passV, failV) = if (taken) (PASS, FAIL) else (FAIL, PASS)
     Seq(
-      LDI(2), imm16(rs), LDI(3), imm16(rt),
-      branch(2, 3, off),
+      LDI(2), imm16(rs),
+      BR(cc, 2, off),
       LDI(1), failV, ST(1, 0, 0), INF_LOOP,
       LDI(1), passV, ST(1, 0, 0), INF_LOOP
     )

@@ -18,12 +18,12 @@ twice:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-2
-    ST R2, [R6 -2]
+    ST R2, [R6 -1]
 
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1

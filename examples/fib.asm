@@ -18,25 +18,41 @@ fib:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-2
-    ST R2, [R6 -2]
+    ST R2, [R6 -1]
 
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #2
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl3
-    JMP .el1
-.cl3:
-    LD R1, [R6 -2]
+    SLT R3, R2, R1
+    BR Z, R3, .el1
+    LD R1, [R6 -1]
     JMP fib_epi
 .el1:
 .ei2:
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #1
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    SUB R1, R2, R1
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R7, R7, #2
+    LD R2, [R7]
+    LDI R5, #.cr3
+    LDI R1, #fib
+    JMP R1
+.cr3:
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    LD R1, [R6 -1]
+    ST R1, [R7]
+    ADDI R7, R7, #-2
+    ADDI R1, R0, #2
     ADDI R7, R7, #2
     LD R2, [R7]
     SUB R1, R2, R1
@@ -48,23 +64,6 @@ fib:
     LDI R1, #fib
     JMP R1
 .cr4:
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R1, R0, #2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    SUB R1, R2, R1
-    ST R1, [R7]
-    ADDI R7, R7, #-2
-    ADDI R7, R7, #2
-    LD R2, [R7]
-    LDI R5, #.cr5
-    LDI R1, #fib
-    JMP R1
-.cr5:
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
@@ -87,18 +86,18 @@ main:
     ADDI R7, R7, #-4
 
     ADDI R1, R0, #10
-    ST R1, [R6 -2]
-    LD R1, [R6 -2]
+    ST R1, [R6 -1]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr6
+    LDI R5, #.cr5
     LDI R1, #fib
     JMP R1
-.cr6:
-    ST R1, [R6 -4]
-    LD R1, [R6 -4]
+.cr5:
+    ST R1, [R6 -2]
+    LD R1, [R6 -2]
 main_epi:
     ADDI R7, R7, #4
     ADDI R7, R7, #2

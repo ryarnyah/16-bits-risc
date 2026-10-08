@@ -8,7 +8,8 @@
     ADDI R1, R1, #2
     ADDI R2, R2, #2
     LDI R4, #__data_init_end
-    BLT R1, R4, .init1
+    SLT R3, R1, R4
+    BR NZ, R3, .init1
     LDI R5, #_exit
     LDI R1, #main
     JMP R1

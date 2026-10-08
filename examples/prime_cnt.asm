@@ -18,35 +18,34 @@ is_prime:
     ADD R6, R7, R0
     ADDI R6, R6, #2
     ADDI R7, R7, #-4
-    ST R2, [R6 -4]
+    ST R2, [R6 -2]
 
     ADDI R1, R0, #2
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
 .w1:
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl3
-    JMP .we2
-.cl3:
-    LD R1, [R6 -4]
+    SLT R3, R2, R1
+    BR Z, R3, .we2
+    LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -2]
+    LD R1, [R6 -1]
     ADDI R7, R7, #2
     LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LDI R5, #.mod16_ret6
+    LDI R5, #.mod16_ret5
     LDI R4, #__mod16
-    LD R1, [R7 +2]
+    LD R1, [R7 +1]
     JMP R4
-.mod16_ret6:
+.mod16_ret5:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
     LD R5, [R7]
@@ -56,14 +55,14 @@ is_prime:
     ADDI R7, R7, #2
     LD R2, [R7]
     XOR R1, R2, R1
-    BNE R1, R0, .el4
+    BR NZ, R1, .el3
     XOR R1, R0, R0
     JMP is_prime_epi
-.el4:
-.ei5:
-    LD R1, [R6 -2]
+.el3:
+.ei4:
+    LD R1, [R6 -1]
     ADDI R1, R1, #1
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     JMP .w1
 .we2:
     ADDI R1, R0, #1
@@ -86,41 +85,40 @@ main:
     ADDI R7, R7, #-4
 
     XOR R1, R0, R0
-    ST R1, [R6 -2]
+    ST R1, [R6 -1]
     ADDI R1, R0, #2
-    ST R1, [R6 -4]
-.w7:
-    LD R1, [R6 -4]
+    ST R1, [R6 -2]
+.w6:
+    LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R1, R0, #30
     ADDI R7, R7, #2
     LD R2, [R7]
-    BLT R2, R1, .cl9
-    JMP .we8
-.cl9:
-    LD R1, [R6 -2]
+    SLT R3, R2, R1
+    BR Z, R3, .we7
+    LD R1, [R6 -1]
     ST R1, [R7]
     ADDI R7, R7, #-2
-    LD R1, [R6 -4]
+    LD R1, [R6 -2]
     ST R1, [R7]
     ADDI R7, R7, #-2
     ADDI R7, R7, #2
     LD R2, [R7]
-    LDI R5, #.cr10
+    LDI R5, #.cr8
     LDI R1, #is_prime
     JMP R1
-.cr10:
+.cr8:
     ADDI R7, R7, #2
     LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R6 -2]
-    LD R1, [R6 -4]
-    ADDI R1, R1, #1
-    ST R1, [R6 -4]
-    JMP .w7
-.we8:
+    ST R1, [R6 -1]
     LD R1, [R6 -2]
+    ADDI R1, R1, #1
+    ST R1, [R6 -2]
+    JMP .w6
+.we7:
+    LD R1, [R6 -1]
 main_epi:
     ADDI R7, R7, #4
     ADDI R7, R7, #2
@@ -133,7 +131,7 @@ main_epi:
 ; ===== Runtime Library =====
 
 __mod16:
-    BEQ R1, R0, __div_exit
+    BR Z, R1, __div_exit
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R6, [R7]
@@ -146,18 +144,18 @@ __mod_lp:
     SLL R5, R5, R6
     LDI R6, #0x8000
     AND R6, R2, R6
-    BEQ R6, R0, __mod_nb
+    BR Z, R6, __mod_nb
     ADDI R6, R0, #1
     OR R5, R5, R6
 __mod_nb:
     ADDI R6, R0, #1
     SLL R2, R2, R6
-    SUB R6, R5, R1
-    BLT R5, R1, __mod_sk
-    ADD R5, R0, R6
+    SLT R6, R5, R1
+    BR NZ, R6, __mod_sk
+    SUB R5, R5, R1
 __mod_sk:
     ADDI R4, R4, #-1
-    BNE R4, R0, __mod_lp
+    BR NZ, R4, __mod_lp
     ADD R1, R0, R5
     ADDI R7, R7, #2
     LD R6, [R7]
