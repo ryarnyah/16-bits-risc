@@ -45,6 +45,35 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val rID_instr = Reg(Bits(16 bits))
   private val rID_pc = Reg(UInt(16 bits))
   private val rID_ldiData = Reg(Bits(16 bits))
+  // Register-file port addresses latched TOGETHER WITH rID_instr (FPGA
+  // timing): deriving them from rID_instr in ID put 2-3 decode/mux levels
+  // in front of the regfile read and every forwarding/hazard compare —
+  // the decode sat on the critical path into rEX_effAddr.  rsAddrOf/
+  // rtAddrOf mirror Decoder's idRsAddr/idRtAddr equations exactly on the
+  // incoming word (formally asserted below); for instructions that read
+  // no register the value is unused (all consumers are class-gated).
+  private val rID_rsAddr = Reg(UInt(3 bits)) init 0
+  private val rID_rtAddr = Reg(UInt(3 bits)) init 0
+
+  private def rsAddrOf(i: Bits): UInt = {
+    val opc = i(15 downto 12)
+    val cf = i(8 downto 6)
+    val isBr = (opc === B"1100") || (opc === B"1101") || (opc === B"1110")
+    val isJmp = (opc === B"1011") && (cf === B"000") && (i(5 downto 0) === 0)
+    val isGb = (opc === B"1011") && (cf.asUInt >= 3)
+    val isByte = (opc === B"1111") && !i(8) &&
+      ((i(7 downto 6) === B"01") || (i(7 downto 6) === B"10"))
+    Mux(isBr || isJmp || isGb, i(11 downto 9).asUInt,
+      Mux(isByte, i(5 downto 3).asUInt, i(8 downto 6).asUInt))
+  }
+  private def rtAddrOf(i: Bits): UInt = {
+    val opc = i(15 downto 12)
+    val isSt = (opc === B"1010") ||
+      ((opc === B"1111") && !i(8) && (i(7 downto 6) === B"10"))
+    val isBr = (opc === B"1100") || (opc === B"1101") || (opc === B"1110")
+    Mux(isSt, i(11 downto 9).asUInt,
+      Mux(isBr, i(8 downto 6).asUInt, i(5 downto 3).asUInt))
+  }
 
   // =========================================================================
   // Pipeline Registers — ID/EX
@@ -111,8 +140,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
     (decoder.io.isBranch ? decoder.io.instr(8 downto 6).asBits |
       decoder.io.rtReg.asBits)).asUInt
 
-  regFile.io.rsAddr := idRsAddr
-  regFile.io.rtAddr := idRtAddr
+  regFile.io.rsAddr := rID_rsAddr
+  regFile.io.rtAddr := rID_rtAddr
 
   // =========================================================================
   // LD State Machine
@@ -127,6 +156,14 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // path can select the lane after rEX has moved on to another instruction.
   private val ldIsByte = Reg(Bool()) init False
   private val ldAddr0 = Reg(Bool()) init False
+  // Store-issue handshake (FPGA timing): set when the ST request fires,
+  // cleared when EX receives its next content.  The store therefore leaves
+  // EX one cycle after fire, decided from this REGISTERED flag instead of
+  // the combinational req.ready — that removes the
+  //   rEX_effAddr → isIoAddr → ready → stStall → stallID → CE
+  // cone that was the nextpnr critical path (addr decode + backpressure
+  // no longer feed any clock-enable).
+  private val stFired = Reg(Bool()) init False
   // Little-endian byte-lane select (v2.1 §2.2/§5.6): zero-extend the addressed
   // byte (addr[0] picks the upper lane), or pass the full word through.
   private def laneSel(word: Bits, isByte: Bool, a0: Bool): Bits =
@@ -167,6 +204,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     (B(0, 10 bits) ## decoder.io.imm6) | idSext
   // v2.1 §4.6: byte memory effective address = Rs + zext(off3) (0..7).
   private val idOffZext3 = B(0, 13 bits) ## decoder.io.instr(2 downto 0)
+
   // Forwarding priority for register reads in ID: EX (LDI only), LD data,
   // WB, regfile — pre-computed selects feeding one nested Mux per port.
   //
@@ -187,13 +225,13 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // while they are themselves in EX.
   private val exLdiWritesRd = (rEX_type === InstrType.LDI) &&
     rEX_hasRd && rEX_rd =/= 0
-  private val idFwdRsExSel = exLdiWritesRd && rEX_rd === idRsAddr
-  private val idFwdRtExSel = exLdiWritesRd && rEX_rd === idRtAddr
+  private val idFwdRsExSel = exLdiWritesRd && rEX_rd === rID_rsAddr
+  private val idFwdRtExSel = exLdiWritesRd && rEX_rd === rID_rtAddr
   private val idFwdExData = rEX_ldiData
-  private val idFwdRsLdSel = ldRspPending && ldRd === idRsAddr && ldRd =/= 0
-  private val idFwdRtLdSel = ldRspPending && ldRd === idRtAddr && ldRd =/= 0
-  private val idFwdRsWbSel = fwdFromWb && rWB_rd === idRsAddr
-  private val idFwdRtWbSel = fwdFromWb && rWB_rd === idRtAddr
+  private val idFwdRsLdSel = ldRspPending && ldRd === rID_rsAddr && ldRd =/= 0
+  private val idFwdRtLdSel = ldRspPending && ldRd === rID_rtAddr && ldRd =/= 0
+  private val idFwdRsWbSel = fwdFromWb && rWB_rd === rID_rsAddr
+  private val idFwdRtWbSel = fwdFromWb && rWB_rd === rID_rtAddr
 
   private val idFwdRsVal = Mux(idFwdRsExSel, idFwdExData,
     Mux(idFwdRsLdSel, ldData,
@@ -203,9 +241,12 @@ case class PipCore() extends Component with CoreBusIoComponent {
     Mux(idFwdRtLdSel, ldData,
       Mux(idFwdRtWbSel, rWB_result,
         regFile.io.rtVal)))
-  private val idEffAddr = Mux(idIsByteMem,
-    (idFwdRsVal.asUInt + idOffZext3.asUInt).asBits,
-    (idFwdRsVal.asSInt + idSext.asSInt).asBits.resized)
+  // Single adder for both word and byte offsets: the immediate operand is
+  // selected BEFORE the add (the old form built two parallel adders and
+  // muxed their outputs, adding a level after the carry chain).  Both forms
+  // are 16-bit modular addition, so the merged expression is bit-identical.
+  private val idAddrImm = idIsByteMem ? idOffZext3 | idSext
+  private val idEffAddr = (idFwdRsVal.asUInt + idAddrImm.asUInt).asBits
   private val idBrShifted = idSext(14 downto 0) ## B"0"
   private val idBrTarget = (rID_pc.asSInt + 2 + idBrShifted.asSInt).asBits.resized
 
@@ -294,7 +335,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     decoder.io.isSTB || decoder.io.isBranch || decoder.io.isCALL) &&
     !decoder.io.isImmEn && !decoder.io.isGrpBImm
   private val loadUseHazard = rEX_type === InstrType.LD && !ldRspPending && rEX_hasRd && rEX_rd =/= 0 &&
-    ((idNeedsRs && idRsAddr === rEX_rd) || (idNeedsRt && idRtAddr === rEX_rd))
+    ((idNeedsRs && rID_rsAddr === rEX_rd) || (idNeedsRt && rID_rtAddr === rEX_rd))
   private val ldWaitStall = rEX_type === InstrType.LD && ldPending && !ldRspPending
   // Stall a new LD from entering EX while a previous LD's data is in
   // DATA_READY.  Without this, ID→EX fires in the same cycle as the
@@ -305,9 +346,11 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val ldActiveStall = (ldRspPending || ldRespNow) && vID &&
     (decoder.io.isLD || decoder.io.isLDB)
   // v2.1: hold the instruction in EX until its store request is accepted
-  // (UART TX backpressure).  Without this, a ST/STB whose req.ready is low
-  // would be overwritten by the next ID→EX transfer and its write lost.
-  private val stStall = rEX_type === InstrType.ST && !io.dataBus.req.ready
+  // (UART TX backpressure) and the acceptance is REGISTERED (stFired).
+  // Without the hold, a ST/STB whose req.ready is low would be overwritten
+  // by the next ID→EX transfer and its write lost; without stFired, the
+  // combinational ready→stall path was the FPGA critical path.
+  private val stStall = rEX_type === InstrType.ST && !stFired
   // Hold ID while an EX load has NOT yet captured its request into the LD
   // FSM (ldState still IDLE).  Without this, an adjacent instruction can
   // replace the EX load before req.fire: with a same-cycle response,
@@ -354,8 +397,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val idUsesRtInId = vID && (decoder.io.isBranch || decoder.io.isCALL)
   private val exIdFwdHazard = ((rEX_type === InstrType.ALU ||
     rEX_type === InstrType.CALL) && rEX_hasRd && rEX_rd =/= 0) &&
-    ((idUsesRsInId && rEX_rd === idRsAddr) ||
-      (idUsesRtInId && rEX_rd === idRtAddr))
+    ((idUsesRsInId && rEX_rd === rID_rsAddr) ||
+      (idUsesRtInId && rEX_rd === rID_rtAddr))
   // "rWB currently holds the result of the instruction that is still sitting
   // in EX" (EX retained across the last edge while EX→WB re-wrote its own
   // result).  Declared here, assigned right after stallID: its D input
@@ -374,6 +417,18 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // hazard above clear.
   rWbHasExRes := exWbFired && rEX_hasRd && rEX_rd =/= 0 &&
     !rEX_brTaken && (stallID || halted) && !dbgFlush
+
+  // Store handshake register: clear on any ID→EX transfer (EX receives new
+  // content or empties), set when the ST request fires.  Both can never
+  // coincide: !stallID with ST in EX implies stFired=1, which forces
+  // valid=0, so no fire can happen in a transfer cycle.
+  // (Uses rEX_brTaken directly — its alias exBrTaken is declared below.)
+  when(!stallID && !rEX_brTaken && !halted) {
+    stFired := False
+  }
+  when(io.dataBus.req.fire && (rEX_type === InstrType.ST)) {
+    stFired := True
+  }
 
   // =========================================================================
   // Forwarding and Branch Detection
@@ -441,6 +496,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
           rID_instr := ldiHeader
           rID_pc := ldiHeaderPc
           rID_ldiData := io.instrRsp.payload
+          rID_rsAddr := rsAddrOf(ldiHeader)
+          rID_rtAddr := rtAddrOf(ldiHeader)
           vID := True
           ldiPending := False
           pc := pc + 2
@@ -448,6 +505,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
           rID_instr := io.instrRsp.payload
           rID_pc := pc
           rID_ldiData := 0
+          rID_rsAddr := rsAddrOf(io.instrRsp.payload)
+          rID_rtAddr := rtAddrOf(io.instrRsp.payload)
           vID := True
           pc := pc + 2
         }
@@ -507,7 +566,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
   io.dataBus.req.payload.wr := rEX_type === InstrType.ST
   io.dataBus.req.payload.isByte := rEX_byte
   io.dataBus.req.valid :=
-    (rEX_type === InstrType.LD && !ldRspPending) || rEX_type === InstrType.ST
+    (rEX_type === InstrType.LD && !ldRspPending) ||
+      (rEX_type === InstrType.ST && !stFired)
 
   // =========================================================================
   // EX → WB Transfer — MUST come BEFORE ID→EX so it sees the OLD rEX_* values
@@ -727,6 +787,11 @@ case class PipCore() extends Component with CoreBusIoComponent {
     assumeInitial(!ldIsByte)
     assumeInitial(!ldAddr0)
     assumeInitial(!ldWbVld)
+    // Store-handshake flag at reset (registered; clk2fflogic leaves frame-0 free)
+    assumeInitial(!stFired)
+    // IF/ID register-file addresses at reset (init 0 in hardware)
+    assumeInitial(rID_rsAddr === 0)
+    assumeInitial(rID_rtAddr === 0)
 
     // ======================================================================
     // Reset invariants
@@ -759,7 +824,9 @@ case class PipCore() extends Component with CoreBusIoComponent {
     // Data bus request properties
     // ======================================================================
     when(rEX_type === InstrType.ST) {
-      assert(io.dataBus.req.valid)
+      // Store handshake: valid stays high until the request fires; after
+      // fire (stFired) it must drop so the held cycle cannot re-issue.
+      assert(io.dataBus.req.valid === !stFired)
       assert(io.dataBus.req.payload.wr)
     }
     // LD req.valid is gated by !ldRspPending (fires only when FSM is not DATA_READY)
@@ -784,6 +851,28 @@ case class PipCore() extends Component with CoreBusIoComponent {
         // (no architectural effect); everything else must occupy EX.
         assert(rEX_type =/= InstrType.EMPTY ||
           past(decoder.io.isReserved) || past(decoder.io.isHALT))
+      }
+    }
+
+    // ======================================================================
+    // IF/ID register-file address latch: must mirror the decoder-derived
+    // mux of the SAME instruction word (latched together with rID_instr).
+    // ======================================================================
+    when(vID) {
+      assert(rID_rsAddr === idRsAddr)
+      assert(rID_rtAddr === idRtAddr)
+    }
+
+    // ======================================================================
+    // Store handshake (stFired): set when the ST request fires, cleared by
+    // any ID→EX transfer (EX receives new content); never both at once.
+    // ======================================================================
+    when(pastValid() && resetn) {
+      when(past(rEX_type) === InstrType.ST && past(io.dataBus.req.fire)) {
+        assert(stFired)
+      }
+      when(past(stFired) && !past(stallID) && !past(exBrTaken) && !past(halted)) {
+        assert(!stFired)
       }
     }
 
@@ -863,7 +952,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     // == ST (ISA §3.3 / §4.10): data bus write with correct addr + data   ==
     // v2.1 §5.6: STB (rEX_byte) writes R[Rd][7:0] in the addressed lane.
     when(rEX_type === InstrType.ST) {
-      assert(io.dataBus.req.valid)
+      assert(io.dataBus.req.valid === !stFired)
       assert(io.dataBus.req.payload.wr)
       assert(io.dataBus.req.payload.addr === rEX_effAddr.asUInt)
       assert(io.dataBus.req.payload.isByte === rEX_byte)
