@@ -135,9 +135,14 @@ v3 ISA timing-neutral). PHASE 1 CLOSED.
    rename). A ~150-site bundle rename carries init-semantics risk for
    readability only — revisit post-Phase-3 if stages are added/removed.
    `InstrType`/`LdPhase` moved to `Types.scala` (same package, zero-risk).
-3. **Explicit next-state**: replace source-order-dependent
-   EX→WB-before-ID→EX (`PipCore.scala:583`) + `rWbHasExRes`/`stFired`
-   feedback protocols with `next_*` wires + single register assignment.
+3. **Explicit next-state (DONE)**: all 9 multi-driver regs
+   (`vID/rEX_type/rEX_brTaken/vWB/halted/stFired/ldWbVld/ldiPending/pc`)
+   via hold-default `next*` wires + file-order override whens, committed
+   once in "State update". Priority == old elaboration order (verified
+   bit-identical by BMC30, not by inspection). Stale MUST-come-BEFORE/
+   AFTER ordering comments corrected (reads were always pre-edge).
+   Single-driver regs untouched. Gate: 35/35 ✓, 50/50 ✓, zero
+   `examples/` diff ✓.
 4. **Debug read-path shared (DONE); LoadStoreUnit CLOSED as no-go.**
    `DebugReads.attach` (`BusInterface.scala`) owns aux-mux + `0x06`/`0x08`
    + rsp defaults; flush commands stay per-core (actions differ).

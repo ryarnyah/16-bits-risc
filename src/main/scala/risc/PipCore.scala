@@ -26,9 +26,12 @@ case class PipCore() extends Component with CoreBusIoComponent {
   io.bus.ack := busIf.io.ack
 
   // =========================================================================
-  // PC
+  // PC (+ next-state wire — task 3: hold-default here, overrides in file
+  // order below, committed once in "State update"; reads see pre-edge)
   // =========================================================================
   private val pc = Reg(UInt(16 bits)) init 0
+  private val nextPC = UInt(16 bits)
+  nextPC := pc
   io.instrAddr := pc
 
   // =========================================================================
@@ -62,8 +65,12 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val rEX_ldiData = Reg(Bits(16 bits))
 
   private val rEX_type = Reg(InstrType()) init InstrType.EMPTY
+  private val nextREXtype = InstrType()
+  nextREXtype := rEX_type
   private val rEX_aluFunc = Reg(Bits(4 bits))
   private val rEX_brTaken = Reg(Bool()) init False
+  private val nextREXbrTaken = Bool()
+  nextREXbrTaken := rEX_brTaken
   private val rEX_jmpTarget = Reg(Bits(16 bits))
   // v2.1 §4.6: byte-memory access (LDB/STB) — selects the byte lane on
   // writeback and sets DataBusReq.isByte (SoC masks the other lane).
@@ -83,6 +90,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // v2.1 §5.4: HALT freezes fetch/decode; set when HALT leaves ID, cleared by
   // the debug/bus commands 0x03/0x04/0x05 (flsPipeline).
   private val halted = Reg(Bool()) init False
+  private val nextHalted = Bool()
+  nextHalted := halted
 
   // v3.2: BR condition code rides in rEX_instr[8:7] (single-register
   // branch; no Rt).  Formal-only reference like exRsAddrRef below.
@@ -100,6 +109,11 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // =========================================================================
   private val vID = Reg(Bool()) init False
   private val vWB = Reg(Bool()) init False
+  private val nextVID = Bool()
+  private val nextVWB = Bool()
+  nextVID := vID
+  // NOTE: no hold-default for nextVWB — vWB is a per-cycle pulse whose
+  // unconditional default (False, below at the old site) is the default.
 
   // =========================================================================
   // Decoder (combinational from rID_instr)
@@ -129,6 +143,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
   private val ldData = Reg(Bits(16 bits))
   private val ldState = Reg(LdPhase()) init LdPhase.IDLE
   private val ldWbVld = Reg(Bool()) init False // valid flag for LD writeback, decoupled from rEX_type
+  private val nextLdWbVld = Bool()
+  nextLdWbVld := ldWbVld
   private val ldPending = ldState === LdPhase.WAIT_BUS
   private val ldRspPending = ldState === LdPhase.DATA_READY
   // v2.1 §5.6: byte-load lane info — captured with ldRd so the WAIT_BUS
@@ -143,6 +159,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // cone that was the nextpnr critical path (addr decode + backpressure
   // no longer feed any clock-enable).
   private val stFired = Reg(Bool()) init False
+  private val nextStFired = Bool()
+  nextStFired := stFired
   // Byte-lane select shared via Isa (single source of truth).
   // Accept response when waiting (WAIT_BUS) or when req fires and response
   // arrives in the same cycle (async RAM read).  Without the second
@@ -283,7 +301,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     is(LdPhase.IDLE) {
       when(rEX_type === InstrType.LD && io.dataBus.req.fire) {
         ldRd := rEX_rd
-        ldWbVld := True
+        nextLdWbVld := True
         // v2.1: remember byte-lane info for the WAIT_BUS capture path
         ldIsByte := rEX_byte
         ldAddr0 := rEX_effAddr(0)
@@ -305,7 +323,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     }
     is(LdPhase.DATA_READY) {
       ldState := LdPhase.IDLE
-      rEX_type := InstrType.EMPTY
+      nextREXtype := InstrType.EMPTY
     }
   }
 
@@ -414,10 +432,10 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // valid=0, so no fire can happen in a transfer cycle.
   // (Uses rEX_brTaken directly — its alias exBrTaken is declared below.)
   when(!stallID && !rEX_brTaken && !halted) {
-    stFired := False
+    nextStFired := False
   }
   when(io.dataBus.req.fire && (rEX_type === InstrType.ST)) {
-    stFired := True
+    nextStFired := True
   }
 
   // =========================================================================
@@ -458,6 +476,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // IF Stage — Instruction Fetch
   // =========================================================================
   private val ldiPending = Reg(Bool()) init False
+  private val nextLdiPending = Bool()
+  nextLdiPending := ldiPending
   private val ldiHeader = Reg(Bits(16 bits))
   private val ldiHeaderPc = Reg(UInt(16 bits))
 
@@ -476,11 +496,11 @@ case class PipCore() extends Component with CoreBusIoComponent {
     // (already in flight before the branch) and must be discarded.
     when(!exBrTaken) {
       when(instrIsLDI && !ldiPending) {
-        ldiPending := True
+        nextLdiPending := True
         ldiHeader := io.instrRsp.payload
         ldiHeaderPc := pc
-        pc := pc + 2
-        vID := False
+        nextPC := pc + 2
+        nextVID := False
       } otherwise {
         when(ldiPending) {
           rID_instr := ldiHeader
@@ -488,38 +508,38 @@ case class PipCore() extends Component with CoreBusIoComponent {
           rID_ldiData := io.instrRsp.payload
           rID_rsAddr := Isa.rsAddrOf(ldiHeader)
           rID_rtAddr := Isa.rtAddrOf(ldiHeader)
-          vID := True
-          ldiPending := False
-          pc := pc + 2
+          nextVID := True
+          nextLdiPending := False
+          nextPC := pc + 2
         } otherwise {
           rID_instr := io.instrRsp.payload
           rID_pc := pc
           rID_ldiData := 0
           rID_rsAddr := Isa.rsAddrOf(io.instrRsp.payload)
           rID_rtAddr := Isa.rtAddrOf(io.instrRsp.payload)
-          vID := True
-          pc := pc + 2
+          nextVID := True
+          nextPC := pc + 2
         }
       }
     } otherwise {
       // Stale response after branch: discard, clear stale LDI state.
-      ldiPending := False
+      nextLdiPending := False
     }
   } otherwise {
     when(!stallIF && !ldiPending) {
-      vID := False
+      nextVID := False
     }
   }
 
   when(exBrTaken) {
-    ldiPending := False
+    nextLdiPending := False
   }
 
   // v2.1 §5.4: once HALT has left ID, drop any instruction IF delivered in
   // the same cycle (it is younger than HALT and must never execute).
-  // Placed after the IF block so it overrides vID := True.
+  // Placed after the IF block so it overrides nextVID := True.
   when(halted) {
-    vID := False
+    nextVID := False
   }
 
   // =========================================================================
@@ -563,11 +583,15 @@ case class PipCore() extends Component with CoreBusIoComponent {
       (rEX_type === InstrType.ST && !stFired)
 
   // =========================================================================
-  // EX → WB Transfer — MUST come BEFORE ID→EX so it sees the OLD rEX_* values
+  // EX → WB Transfer — reads pre-edge rEX_* (SpinalHDL reads are always
+  // pre-edge, so no source ordering is required); priority vs the ID→EX
+  // transfer below is explicit: ID→EX assigns nextREXtype LATER, so a
+  // simultaneous transfer wins over retention (intended — the LD FSM owns
+  // completed accesses via ldRd/ldWbVld, see ldWbFiring).
   // =========================================================================
 
   // Default: no new WB data
-  vWB := False
+  nextVWB := False
 
   // Non-LD/ST: transfer every cycle (no stall guard — ID→EX stalls handle
   // load-use hazards; general RAW hazards are resolved via forwarding).
@@ -594,7 +618,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
       rWB_hasRd := rEX_hasRd
       rWB_result := exResult
     }
-    vWB := True
+    nextVWB := True
   }
 
   // LD: direct write to regfile when FSM is in DATA_READY state.
@@ -609,21 +633,23 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // legitimate LD+JMP sequences (e.g. __mul16 epilogue).
   private val ldWbFiring = ldRspPending && ldWbVld
   when(ldWbFiring) {
-    ldWbVld := False
+    nextLdWbVld := False
   }
 
   // =========================================================================
   // Branch target update (uses pre-clear rEX_type for JMP/CALL vs BR)
   // =========================================================================
   when(exBrTaken) {
-    pc := Mux(rEX_type === InstrType.JMP || rEX_type === InstrType.CALL,
+    nextPC := Mux(rEX_type === InstrType.JMP || rEX_type === InstrType.CALL,
       rEX_jmpTarget.asUInt, rEX_brTarget.asUInt)
-    vID := False
-    ldiPending := False
+    nextVID := False
+    nextLdiPending := False
   }
 
   // =========================================================================
-  // ID → EX Transfer — AFTER EX→WB so it doesn't corrupt writeback values
+  // ID → EX Transfer — assigns nextREXtype after EX→WB's readers, so both
+  // orders elaborate identically; the vID-gated nesting below (not a Mux)
+  // avoids the vClr race documented there.
   // =========================================================================
   private val idType = InstrType()
   idType := InstrType.ALU
@@ -653,9 +679,9 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // branch PC update every cycle (the old combinational formula would
   // have automatically resolved to False once rEX_type was EMPTY).
   when(exBrTaken) {
-    rEX_type := InstrType.EMPTY
-    ldiPending := False
-    rEX_brTaken := False
+    nextREXtype := InstrType.EMPTY
+    nextLdiPending := False
+    nextREXbrTaken := False
   }
 
   // Normal ID→EX transfer (when no stall/flush).  vID is used in an inner
@@ -668,11 +694,11 @@ case class PipCore() extends Component with CoreBusIoComponent {
     when(vID) {
       // Clear vID when IF→ID is not also firing (otherwise the new
       // instruction from IF would be lost).
-      when(!io.instrRsp.fire) { vID := False }
+      when(!io.instrRsp.fire) { nextVID := False }
       // v2.1 §5.4: HALT freezes fetch/decode — set here (with an older
       // instruction still draining through EX/WB), gated above by
       // !stallID/!exBrTaken so a flushed speculative HALT never halts.
-      when(decoder.io.isHALT) { halted := True }
+      when(decoder.io.isHALT) { nextHalted := True }
       rEX_instr := rID_instr
       rEX_pc := rID_pc
       rEX_rd := (decoder.io.hasRd ? decoder.io.rdField | B"000").asUInt
@@ -693,15 +719,15 @@ case class PipCore() extends Component with CoreBusIoComponent {
       rEX_immEn := decoder.io.isImmEn || decoder.io.isGrpBImm
 
       rEX_aluFunc := decoder.io.aluFunc
-      rEX_type := idType
-      rEX_brTaken := idBrTaken
+      nextREXtype := idType
+      nextREXbrTaken := idBrTaken
       rEX_jmpTarget := idJmpTarget
     } otherwise {
       // Clear rEX_type when ID is empty (vID=0).  Without this, a stale
       // LD/ST lingering in EX would re-trigger its bus request every cycle
       // (io.dataBus.req.valid is combinational from rEX_type), causing
       // duplicate bus transactions.
-      rEX_type := InstrType.EMPTY
+      nextREXtype := InstrType.EMPTY
     }
   }
 
@@ -711,6 +737,20 @@ case class PipCore() extends Component with CoreBusIoComponent {
   regFile.io.wrAddr := Mux(ldWbFiring && ldRd =/= 0, ldRd, rWB_rd)
   regFile.io.wrData := Mux(ldWbFiring && ldRd =/= 0, ldData, rWB_result)
   regFile.io.wrEn := (ldWbFiring && ldRd =/= 0) || (vWB && rWB_hasRd && rWB_rd =/= 0)
+
+  // =========================================================================
+  // State update — the ONLY drivers of these registers. Priority between
+  // overlapping overrides is file order above (later source wins).
+  // =========================================================================
+  vID := nextVID
+  rEX_type := nextREXtype
+  rEX_brTaken := nextREXbrTaken
+  vWB := nextVWB
+  halted := nextHalted
+  stFired := nextStFired
+  ldWbVld := nextLdWbVld
+  ldiPending := nextLdiPending
+  pc := nextPC
 
   // =========================================================================
   // Debug Bus
@@ -725,10 +765,10 @@ case class PipCore() extends Component with CoreBusIoComponent {
   busIf.io.cmdDone := False
 
   private def flsPipeline(): Unit = {
-    ldiPending := False; vID := False
-    rEX_type := InstrType.EMPTY; vWB := False
+    nextLdiPending := False; nextVID := False
+    nextREXtype := InstrType.EMPTY; nextVWB := False
     // v2.1 §5.4: debug/bus commands exit HALT (reset 0x03, step 0x04, run 0x05)
-    halted := False
+    nextHalted := False
     busIf.io.cmdDone := True
   }
 
