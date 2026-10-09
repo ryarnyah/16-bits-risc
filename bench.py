@@ -2,14 +2,14 @@
 import subprocess, sys, os, re, argparse, time, math
 
 CC = sys.executable + ' cc.py'
-BUILD_DIR = 'emulator/build/obj_dir'
+BUILD_DIR = 'emulator/build'
 EMULATOR = os.path.join(BUILD_DIR, 'emulator')
-EMULATOR_PIPSOC = os.path.join(BUILD_DIR, 'pipsoc-emu')
+EMULATOR_PIPSOC = os.path.join(BUILD_DIR, 'obj_dir', 'pipsoc-emu')
 
 # Benchmark name → (expected R1 value, description)
 BENCHMARKS = [
     ('bench_nop.c',   0x3E8,   'ADDI loop (1000 iters)'),
-    ('bench_alu.c',   0x1428,  'ALU ops (500 iters)'),
+    ('bench_alu.c',   0x2E0B,  'ALU ops (500 iters)'),  # ground truth via python model
     ('bench_mem.c',   0x3A02,  'LD/ST array (100 elems)'),
 ]
 
@@ -31,7 +31,7 @@ def run_steps(emulator_cmd, hex_file, steps):
     hex_path = os.path.join('examples', hex_file)
     input_str = f's {steps}\nr 1\nc\nq\n'
     try:
-        r = subprocess.run(emulator_cmd, input=input_str,
+        r = subprocess.run(emulator_cmd + [hex_path], input=input_str,
             capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
         return None, None
@@ -65,8 +65,9 @@ def measure_cycles(emulator_cmd, hex_file, expected, max_steps=200000):
 
 def main():
     parser = argparse.ArgumentParser(description='RISC Core Benchmark Suite')
-    parser.add_argument('--max-steps', type=int, default=200000,
-        help='Maximum step count for binary search (default: 200000)')
+    parser.add_argument('--max-steps', type=int, default=600000,
+        help='Maximum step count for binary search (default: 600000; the '
+             'multi-cycle core needs ~500k for bench_alu)')
     parser.add_argument('--list', action='store_true',
         help='List available benchmarks without running')
     args = parser.parse_args()

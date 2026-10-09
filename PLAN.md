@@ -170,6 +170,18 @@ behavior change (50/50 byte-identical `.hex`) ✓. PHASE 2 CLOSED
 
 ## Phase 3 — Speed (on stable, clean v3)
 
+Baseline (v3.3 + Phase 2, `bench.py` cycles-to-completion):
+| bench | Multi-cycle | PipSoc | note |
+|:--|--:|--:|:--|
+| nop (1000 ADDI iters) | 18,667 | 27,977 | pipeline LOSES: LD-heavy body pays ldIssue + LD latency every iter |
+| alu (500 iters, incl. 500 `__mul16`) | 290,583 | 181,554 | call + runtime dominated |
+| mem (100-elem LD/ST) | 68,972 | 43,011 | 1.6× on streaming memory |
+Fmax baseline (post-route): **106.19 MHz PASS** (Phase-1 exit).
+Measurement fixes this pass: `bench.py` never passed the hex file
+(measured empty ROM), stale multi-cycle path, stale `bench_alu`
+expectation (`0x1428`, ground truth `0x2E0B` via python model),
+`max_steps` 200k→600k (multi-cycle `bench_alu` needs ~290k).
+
 Fmax (re-baseline after v3; was 103.83 MHz):
 - Register `dataBus.req` (skid) — cuts SoC `isIoAddr` + RAM-addr fanout.
 - `instrRsp.ready` decoupled from `stallID` cone (ready=True + discard,
