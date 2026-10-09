@@ -27,6 +27,9 @@
 - **Phase 2 (maintainability) CLOSED:** Isa helpers, next-state,
   DebugReads, ANALYZE.md deleted; bundles/LoadStoreUnit deferred,
   inline-formal confirmed. All gates green throughout.
+- **Phase 3 (speed) MEASURING:** `bench.py` fixed (hex arg, expectation,
+  steps); baseline PipSoc nop/alu/mem = 27977/181554/43011 cycles;
+  pipeline loses nop to multi-cycle (LD latency) → ldIssue removal is #1
 
 - **Package:** `risc`
 - **Bus:** 8-bit Stream cmd/rsp + ack, per INSTRUCTIONS.md
