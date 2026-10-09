@@ -20,12 +20,10 @@ object LdPhase extends SpinalEnum {
   val IDLE, WAIT_BUS, DATA_READY = newElement()
 }
 
-case class CoreConfig()
-
 case class CoreBusIo() extends Bundle with IMasterSlave {
-  val cmd = Stream(Bits(8 bits))
-  val rsp = Stream(Bits(8 bits))
-  val ack = Bool()
+  val cmd: Stream[Bits] = Stream(Bits(8 bits))
+  val rsp: Stream[Bits] = Stream(Bits(8 bits))
+  val ack: Bool = Bool()
 
   override def asMaster(): Unit = {
     master(cmd)

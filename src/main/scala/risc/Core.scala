@@ -120,11 +120,8 @@ case class Core() extends Component with CoreBusIoComponent {
   // All other instrs: wrEn asserted in WRITEBACK (aluRes already computed)
   regFile.io.wrEn := (rd =/= 0) && (state === CoreState.WRITEBACK) &&
     (!isLoad || io.dataBus.rsp.fire)
-  regFile.io.auxAddr := Mux(
-    busIf.io.cmdStrb && busIf.io.cmdWord(31 downto 24) === 0x06,
-    busIf.io.cmdWord(18 downto 16).asUInt,
-    U"001"
-  )
+  // Shared debug read path (0x06/0x08); flush commands below stay local.
+  DebugReads.attach(busIf, regFile, PC)
   io.dbgRegFile1 := regFile.io.auxVal
 
   // === Branch target ===
@@ -154,25 +151,15 @@ case class Core() extends Component with CoreBusIoComponent {
     (stVal(7 downto 0) ## B(0, 8 bits)),
     (B(0, 8 bits) ## stVal(7 downto 0)))
 
-  // === Bus command processing ===
-  // Commands: 0x03=RESET, 0x04=STEP, 0x05=RUN, 0x06=READ_REG, 0x08=READ_PC
+  // === Bus command processing (flush only; reads via DebugReads) ===
+  // Commands: 0x03=RESET, 0x04=STEP, 0x05=RUN
   busIf.io.cmdDone := False
-  busIf.io.rspStrb := False
-  busIf.io.rspWord := 0
 
   when(busIf.io.cmdStrb) {
     switch(busIf.io.cmdWord(31 downto 24)) {
       is(0x03) { state := CoreState.IDLE; PC := 0; running := False; busIf.io.cmdDone := True }
       is(0x04) { state := CoreState.FETCH; busIf.io.cmdDone := True }
       is(0x05) { state := CoreState.FETCH; running := True; busIf.io.cmdDone := True }
-      is(0x06) {
-        busIf.io.rspWord := B(0, 16 bits) ## regFile.io.auxVal
-        busIf.io.rspStrb := True
-      }
-      is(0x08) {
-        busIf.io.rspWord := B(0, 16 bits) ## PC.asBits
-        busIf.io.rspStrb := True
-      }
     }
   }
 

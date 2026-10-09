@@ -138,9 +138,14 @@ v3 ISA timing-neutral). PHASE 1 CLOSED.
 3. **Explicit next-state**: replace source-order-dependent
    EX→WB-before-ID→EX (`PipCore.scala:583`) + `rWbHasExRes`/`stFired`
    feedback protocols with `next_*` wires + single register assignment.
-4. **Extract `DebugBridge`** (cmd `0x03/04/05/06/08` handling duplicated in
-   `Core.scala:163-177`, `PipCore.scala:752-766`) and `LoadStoreUnit`
-   (LD FSM + `ldIssueStall` + byte-lane logic).
+4. **Debug read-path shared (DONE); LoadStoreUnit CLOSED as no-go.**
+   `DebugReads.attach` (`BusInterface.scala`) owns aux-mux + `0x06`/`0x08`
+   + rsp defaults; flush commands stay per-core (actions differ).
+   LoadStoreUnit NOT extracted: the LD FSM is inseparable from the
+   single-Stream dataBus master (EX issue), WB writeback, and 5 forwarding/
+   stall consumers — a component boundary would be wider than the logic
+   and split formally-pinned protocol. Its Phase-3 changes (ldIssue
+   capture, store buffer) reshape it anyway — extract-if-needed there.
 5. **Inline formal structure — CLOSED, no change.** Evaluated: the
    `*FormalTest.scala` runners only invoke `GenerationFlags.formal` blocks
    that MUST live inside the components (they reference private pipeline

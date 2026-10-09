@@ -183,3 +183,37 @@ case class BusInterface() extends Component {
     cover(io.rsp.valid)
   }
 }
+
+/**
+ * Shared debug-bus read path (commands `0x06`/`0x08` + aux-port mux).
+ *
+ * Both cores wire this identically; only the PC source differs (`Core.PC`
+ * vs `PipCore.pc`). Flush commands (`0x03`/`0x04`/`0x05`) deliberately stay
+ * per-core — their register actions differ (`Core`: state/PC/running,
+ * `PipCore`: pipeline/halted flush). Owns the `rspWord`/`rspStrb`
+ * defaults, so callers must NOT drive those (single static driver rule);
+ * `cmdDone` stays per-core with the flush logic.
+ */
+object DebugReads {
+  def attach(busIf: BusInterface, regFile: RegFile, pcVal: UInt): Unit = {
+    regFile.io.auxAddr := Mux(
+      busIf.io.cmdStrb && busIf.io.cmdWord(31 downto 24) === 0x06,
+      busIf.io.cmdWord(18 downto 16).asUInt,
+      U"001"
+    )
+    busIf.io.rspStrb := False
+    busIf.io.rspWord := 0
+    when(busIf.io.cmdStrb) {
+      switch(busIf.io.cmdWord(31 downto 24)) {
+        is(0x06) {
+          busIf.io.rspWord := B(0, 16 bits) ## regFile.io.auxVal
+          busIf.io.rspStrb := True
+        }
+        is(0x08) {
+          busIf.io.rspWord := B(0, 16 bits) ## pcVal.asBits
+          busIf.io.rspStrb := True
+        }
+      }
+    }
+  }
+}
