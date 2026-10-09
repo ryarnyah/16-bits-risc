@@ -190,11 +190,27 @@ Fmax (re-baseline after v3; was 103.83 MHz):
 IPC (profile with `bench.py` first):
 - Capture `ldRd/ldIsByte/ldAddr0` in ID→EX transfer → delete
   `ldIssueStall` 1-bubble-per-load (`PipCore.scala:369-370`).
+  **DONE** (`LdPhase.SNAPSHOT`, snapshot regs `snapRd/snapByte/
+  snapAddr0/snapAddr`; bus is LD-unit-owned — request valid iff
+  `snapPending && !ldRspPending`).  Bench (async RAM): nop
+  27,977→**21,014**, alu 181,554→**174,012**, mem 43,011→**41,504**.
+- **DONE** store-to-load bypass: `{stTrackVld,stTrackAddr,stTrackData}`
+  updated at ST fire (STB/I-O invalidate), word LD to the tracked word
+  completes at ID→EX into DATA_READY without the bus
+  (`examples/bypass_test.asm`, formal tracker/bypass asserts).
 - 1-deep store buffer → ST to full UART no longer stalls IF/ID/EX.
 - Narrow EX→ID forward to pre-compute consumers only
   (`idEffAddr/idBrTaken/idJmpTarget`) instead of full-operand latch.
 - 1-bit BTB for loop back-edges (compiler output is loop-heavy).
 - Revisit `Core.scala` role: debug/golden model only, not a perf path.
+
+Known limitation (sync data RAM): the LD unit's direct regfile writeback
+assumes an async response — with a 1-cycle-late (readSync) response the
+writeback lands after later instructions have retired (WAW inversion) and
+collides with the WB write port, silently dropping the ALU/CALL write
+(observed: `ADDI R7` frame updates; 8 loop tests fail).  Supporting
+sync RAM (BRAM) needs an in-order writeback redesign (e.g. stall ID→EX
+while a load is outstanding, or route load data through the WB port).
 
 Phase-3 exit gate: `bench-all` cycles/instr + nextpnr Fmax reported per
 change; no change accepted that regresses either without a recorded reason.

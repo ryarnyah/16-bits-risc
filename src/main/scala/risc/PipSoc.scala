@@ -81,6 +81,11 @@ private val core = PipCore()
 
   uart.io.rxPop := uartReadPending && uart.io.rxVld
 
+  // Async RAM: the LD unit consumes the response in the fire cycle
+  // (SNAPSHOT state), so the WB-stage writeback stays in program order —
+  // a sync (1-cycle-late) response would let later instructions retire
+  // before the load (WAW inversion) and collide with the regfile write
+  // port (dropped ADDI R7 frame updates; see PLAN.md known limitation).
   private val ramRdData = dataRam.readAsync(dataWordAddr)
   private val ramRspVld = core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr
 

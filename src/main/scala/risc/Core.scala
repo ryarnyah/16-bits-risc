@@ -34,6 +34,11 @@ case class CoreIo() extends Bundle {
   val dbgCmdBuf: Bits = out Bits (32 bits)
   val dbgRspBuf: Bits = out Bits (32 bits)
   val dbgRegFile1: Bits = out Bits (16 bits)
+  /** Stall-cause vector (PipCore only, Core drives 0): bit0 loadUse,
+    * bit1 ldBusy, bit2 snapLd, bit3 snapSt, bit4 stStall, bit5 exIdFwd,
+    * bit6 ldiStall. Observability for profiling; pruned in FPGA builds
+    * if unconnected. */
+  val dbgStall: Bits = out Bits (7 bits)
 }
 
 case class Core() extends Component with CoreBusIoComponent {
@@ -283,6 +288,7 @@ case class Core() extends Component with CoreBusIoComponent {
   io.dbgBusWordFire := busIf.io.cmdStrb
   io.dbgCmdBuf := busIf.io.cmdWord
   io.dbgRspBuf := busIf.io.rspWord
+  io.dbgStall := B"0000000" // multi-cycle core: no pipeline stalls
 
   override def bus(): CoreBusIo = io.bus
 

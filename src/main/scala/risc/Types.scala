@@ -15,9 +15,10 @@ object InstrType extends SpinalEnum {
   val EMPTY, ALU, LD, ST, JMP, BR, LDI, CALL = newElement()
 }
 
-/** Load-data FSM phases (PipCore LD unit). */
+/** Load-data FSM phases (PipCore LD unit). SNAPSHOT (Phase 3): request
+  * captured at ID→EX entry, not yet issued on the bus. */
 object LdPhase extends SpinalEnum {
-  val IDLE, WAIT_BUS, DATA_READY = newElement()
+  val IDLE, SNAPSHOT, WAIT_BUS, DATA_READY = newElement()
 }
 
 case class CoreBusIo() extends Bundle with IMasterSlave {

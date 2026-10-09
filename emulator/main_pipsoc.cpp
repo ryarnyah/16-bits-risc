@@ -282,22 +282,40 @@ public:
             auto rWB_result = r->PipSoc__DOT__core__DOT__rWB_result;
             auto stallID = r->PipSoc__DOT__core__DOT__stallID;
             auto ldRd = r->PipSoc__DOT__core__DOT__ldRd;
+            auto ldWbVld = r->PipSoc__DOT__core__DOT__ldWbVld;
+            auto snapRd = r->PipSoc__DOT__core__DOT__snapRd;
+            auto reqFire = r->PipSoc__DOT__io_dataBus_req_fire;
+            auto rspFire = r->PipSoc__DOT__io_dataBus_rsp_fire;
+            auto reqVld = reqFire;   // emulator RAM/UART ready is 1 when valid here
+            auto rspVld = rspFire;
+            auto ramVld = r->PipSoc__DOT__ramRspVld;
+            auto ramAddr = 0;
             auto aluRes_ = r->PipSoc__DOT__core__DOT__exResult;
             auto exBrTaken_ = r->PipSoc__DOT__core__DOT__rEX_brTaken;
             auto r2val = r->PipSoc__DOT__core__DOT__regFile_1__DOT__regs_2;
             auto r6val = r->PipSoc__DOT__core__DOT__regFile_1__DOT__regs_6;
+            // Write-port collision detector: both regfile writers active in
+            // this cycle → the rWB (ALU) write is silently dropped at the edge.
+            auto wbf_ = r->PipSoc__DOT__core__DOT__ldWbFiring;
+            auto vwb_ = r->PipSoc__DOT__core__DOT__vWB;
+            auto wren_ = (wbf_ && ldRd != 0) ||
+                         (vwb_ && rWB_hasRd && rWB_rd != 0);
+            auto wrad_ = r->PipSoc__DOT__core__DOT__regFile_1_io_wrAddr;
+            auto hx_ = r->PipSoc__DOT__core__DOT__rWbHasExRes;
             auto rf_r1 = readReg(1);
             auto rf_r2 = readReg(2);
             auto rf_r3 = readReg(3);
             auto rf_r4 = readReg(4);
             auto rf_r6 = readReg(6);
-            printf("[%ld] PC=%04x  ID:pc=%04x instr=%04x ldi=%04x hdr=%04x v=%d  EX:rs=%d rt=%d v=%d isLD=%d isST=%d rd=%d alu=%04x br=%d  WB:rd=%d has=%d ld=%d res=%04x stl=%d  R1=%04x R2=%04x R3=%04x R4=%04x R6=%04x fb=%04x\n",
+            printf("[%ld] PC=%04x ID:pc=%04x instr=%04x ldi=%04x hdr=%04x v=%d EX:rs=%d rt=%d v=%d isLD=%d isST=%d rd=%d alu=%04x br=%d WB:rd=%d has=%d ld=%d res=%04x stl=%d R1=%04x R2=%04x R3=%04x R4=%04x R6=%04x fb=%04x LD:st=%d wv=%d rd=%d sn=%d qv=%d qf=%d pv=%d pf=%d ramV=%d ramA=%04x wbf=%d vwb=%d wen=%d wad=%d hx=%d\n",
                 (long)cycle, pc_, rID_pc, rID_instr, rID_ldiData, ldiHeader, vID,
                 rEX_rsAddr, rEX_rtAddr, exVld, exIsLD, exIsST, rEX_rd,
                 aluRes_, exBrTaken_,
                 rWB_rd, rWB_hasRd, ldActive, rWB_result, stallID,
                 rf_r1, rf_r2, rf_r3, rf_r4, rf_r6,
-                ldiHeader);
+                ldiHeader, ldState, ldWbVld, ldRd, snapRd,
+                reqVld, reqFire, rspVld, rspFire, ramVld, ramAddr,
+                wbf_, vwb_, wren_, wrad_, hx_);
         }
         u16 r1_s = readReg(1);
         u16 r2_s = readReg(2);
