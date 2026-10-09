@@ -161,8 +161,10 @@ v3 ISA timing-neutral). PHASE 1 CLOSED.
    misleading, unmaintained). Single source of truth: `ISA-3.0.md` +
    code comments + this plan.
 
-Phase-2 exit gate: zero duplicated decode equations (grep), no behavior
-change (`test-programs-all` 50/50 byte-identical `.hex` before/after).
+Phase-2 exit gate: zero duplicated decode equations (grep: single
+`rsAddrOf`/`rtAddrOf`/`brTaken`/`laneSel` defs in `Isa.scala`) ✓, no
+behavior change (50/50 byte-identical `.hex`) ✓. PHASE 2 CLOSED
+(deferred items recorded with rationale: bundles, LoadStoreUnit split).
 
 ---
 
