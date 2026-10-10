@@ -125,6 +125,11 @@ case class Core() extends Component with CoreBusIoComponent {
   // All other instrs: wrEn asserted in WRITEBACK (aluRes already computed)
   regFile.io.wrEn := (rd =/= 0) && (state === CoreState.WRITEBACK) &&
     (!isLoad || io.dataBus.rsp.fire)
+  // RegFile port 2 unused here: the multi-cycle core retires one
+  // instruction at a time (WRITEBACK state), so writes never collide.
+  regFile.io.wr2En := False
+  regFile.io.wr2Addr := U(0, 3 bits)
+  regFile.io.wr2Data := B(0, 16 bits)
   // Shared debug read path (0x06/0x08); flush commands below stay local.
   DebugReads.attach(busIf, regFile, PC)
   io.dbgRegFile1 := regFile.io.auxVal

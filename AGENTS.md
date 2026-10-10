@@ -28,11 +28,14 @@
   DebugReads, ANALYZE.md deleted; bundles/LoadStoreUnit deferred,
   inline-formal confirmed. All gates green throughout.
 - **Phase 3 (speed) MEASURING:** `bench.py` fixed (hex arg, expectation,
-  steps); baseline PipSoc nop/alu/mem = 27977/181554/43011 cycles;
-  snapshot + store-to-load bypass DONE (21014/174012/41504);
-  Fmax recorded regression 106.19 → ~88-90 MHz FAIL@100 with full
-  critical-path analysis in PLAN.md (bypass word compare off the ID
-  effective-address adder is the delta; fixable only with an IPC loss)
+  steps); baselines re-measured with the monotone end predicate (the
+  recorded nop numbers were R1-only artifacts — truth: multi 41080,
+  PipSoc 26048; alu 290583/181554 and mem 68972/43011 stand);
+  snapshot + store-to-load bypass DONE (PipSoc alu 174012, mem 41504);
+  RegFile dual write ports DONE (correctness, Key Fix 25); Fmax
+  106.19 → ~88-90 FAIL@100 (critical-path analysis in PLAN.md, bypass
+  word compare = the delta) **recovered to 101.38 MHz PASS** by the
+  dual-port netlist
 
 - **Package:** `risc`
 - **Bus:** 8-bit Stream cmd/rsp + ack, per INSTRUCTIONS.md
@@ -330,6 +333,30 @@
       83.27, timingweight variants 87.6-88.6 — structural ceiling
       ~88-90 MHz; full analysis + recorded IPC trade in PLAN.md.
 
+25. **PipCore RegFile write-port collision — dual write ports** (found
+    by the Phase-3 profiling/cc.py work; `RegFile.scala`, `PipCore.scala`,
+    `Core.scala`):
+    - Latent bug: `ldWbFiring` (LD direct regfile write) and `vWB`
+      (WB ALU/CALL write) shared ONE write port with a priority mux —
+      same cycle, different rds ⇒ the WB write was **silently
+      dropped**.  Old codegen shielded it for years (every LD preceded
+      by `ADDI R7` → exIdFwdHazard stall, or by an ST → no writeback);
+      the cc.py MOV optimization's `LD R1; MOV R2,R1; LD R1`
+      sequence exposed it (4 PipSoc-only test failures:
+      multest/gcd/prime_cnt/mod_simple2; multi-cycle unaffected —
+      WRITEBACK serialises writes).
+    - Fix: RegFile gets a 2nd write port (8×16 FFs); port 1 keeps the
+      byte-identical original muxed equation (all pre-existing formal
+      properties unchanged), port 2 carries the WB write only when
+      port 1 is occupied by the LD writeback; same-address conflicts
+      still resolve to port 1 (unchanged WAW semantics); multi-cycle
+      Core ties port 2 off.  Formal: TC-RF-3b (port-2 readback under
+      concurrent writes), TC-RF-7 (same-addr priority),
+      `cover(wrEn && wr2En)`, PipCore concurrent LD+WB wiring asserts.
+    - Gates: `sbt test` 35/35; 51/51 both emulators; coverage clean;
+      bench cycle-neutral; F4PGA **101.38 MHz PASS at 100 MHz**
+      (recovered the Phase-3 Fmax regression — new netlist placement).
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully
@@ -407,7 +434,9 @@ still NOP — see `ISA-2.1.md` §11):
   - Frames → .bit (xc7frames2bit), valid Xilinx sync word `0009 0ff0...`
 - [x] `make f4pga-pipsoc` (PipSoc): **complete end-to-end through
   bitstream** — `F4PGA_PROG` baked into `f4pga/build/PipSoc.sv` (fixes
-  `$buf` no-BEL); timing **103.83 MHz PASS at 100 MHz** (fixes #21/#22)
+  `$buf` no-BEL); timing **103.83 MHz PASS at 100 MHz** (fixes #21/#22);
+  Phase-3 dual-write-port netlist re-measured **101.38 MHz PASS**
+  (recovered the snapshot+bypass ~88-90 FAIL regression)
 - [ ] `f4pga_program` needs a Basys3 board connected via USB
 
 ### GCC 15 Compatibility

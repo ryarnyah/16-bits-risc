@@ -865,9 +865,24 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // =========================================================================
   // WB Stage — Register File Write (with LD direct-write bypass)
   // =========================================================================
-  regFile.io.wrAddr := Mux(ldWbFiring && ldRd =/= 0, ldRd, rWB_rd)
-  regFile.io.wrData := Mux(ldWbFiring && ldRd =/= 0, ldData, rWB_result)
-  regFile.io.wrEn := (ldWbFiring && ldRd =/= 0) || (vWB && rWB_hasRd && rWB_rd =/= 0)
+  // Port 1 keeps the original muxed LD/WB equation (byte-identical
+  // semantics for the existing formal properties).  Port 2 carries the
+  // WB write only in the cycle where port 1 is simultaneously occupied
+  // by an LD writeback (ldWbTerm && wbWrTerm) — the single-port mux used
+  // to silently DROP that WB write there.  Reachable e.g. with a
+  // store-to-load bypass LD: its DATA_READY/writeback lands at transfer+1
+  // while its predecessor (an ALU/CALL) sits in WB, or with a delayed
+  // bus/UART response completing next to an unrelated ALU writeback.
+  // Exposed by cc.py's MOV operand handoff (`LD; MOV; LD(bypass)` — the
+  // old stack round-trip always put an ADDI R7 or ST before the LD).
+  private val ldWbTerm = ldWbFiring && ldRd =/= 0
+  private val wbWrTerm = vWB && rWB_hasRd && rWB_rd =/= 0
+  regFile.io.wrAddr := Mux(ldWbTerm, ldRd, rWB_rd)
+  regFile.io.wrData := Mux(ldWbTerm, ldData, rWB_result)
+  regFile.io.wrEn := ldWbTerm || wbWrTerm
+  regFile.io.wr2En := ldWbTerm && wbWrTerm
+  regFile.io.wr2Addr := rWB_rd
+  regFile.io.wr2Data := rWB_result
 
   // =========================================================================
   // State update — the ONLY drivers of these registers. Priority between
@@ -993,6 +1008,24 @@ case class PipCore() extends Component with CoreBusIoComponent {
     // Register file never writes to R0
     // ======================================================================
     when(regFile.io.wrEn) { assert(regFile.io.wrAddr =/= 0) }
+    when(regFile.io.wr2En) { assert(regFile.io.wr2Addr =/= 0) }
+
+    // ======================================================================
+    // Concurrent LD + WB writeback: BOTH writes must land (dual-port fix)
+    // ======================================================================
+    // Before the dual-port RegFile the single-port priority mux silently
+    // dropped the WB write whenever ldWbFiring coincided with vWB for a
+    // different rd (e.g. a store-to-load bypass LD completing while its
+    // ALU predecessor is in WB).  RegFile TC-RF-3b/TC-RF-7 machine-check
+    // that both ports' writes are visible; this pins the wiring.
+    when(ldWbFiring && ldRd =/= 0 && vWB && rWB_hasRd && rWB_rd =/= 0) {
+      assert(regFile.io.wrEn)
+      assert(regFile.io.wrAddr === ldRd)
+      assert(regFile.io.wrData === ldData)
+      assert(regFile.io.wr2En)
+      assert(regFile.io.wr2Addr === rWB_rd)
+      assert(regFile.io.wr2Data === rWB_result)
+    }
 
     // ======================================================================
     // Data bus request properties

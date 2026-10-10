@@ -202,6 +202,7 @@ gate; snapshot+bypass trades depth for IPC):
 | + `rBusAddr`/`rBusByte` bus-issue regs | 90.13 FAIL |
 | + `bypassTake` isIoAddr-term removal | (cone cleared) |
 | + boolean `isIoAddr` rewrite | **87.57 FAIL** (default seed) |
+| + dual write ports (RegFile port-2 write mux) | **101.38 MHz PASS** (new netlist placement — the ~88-90 ceiling was netlist-specific) |
 
 - Tool-level sweeps are exhausted: seeds 2-5 on the pre-boolean netlist
   79.08-91.31; `--placer sa` crashes in nextpnr-xilinx (exit 255);
@@ -223,6 +224,49 @@ gate; snapshot+bypass trades depth for IPC):
   re-serialises the same carry depth through the `c0 = rs[0]&imm[0]`
   term; narrowing the compare to the 12-bit RAM word index does not
   reduce LUT levels (both 2) and lengthens the carry to bit 12.
+
+### Change: RegFile dual write ports (correctness fix found by profiling)
+
+Profiling (per "profile with bench.py first") showed `bench_nop` is
+compiler-bound: 13 instructions / 9 memory ops per loop iteration for
+two scalars — every operand handoff round-trips through the memory
+stack (`ST R1,[R7]; ADDI R7,#-2; …; LD R2,[R7]`).  The first cc.py fix
+(MOV the left operand to R2 instead of the push/pop when the right side
+is R1-pure) failed **4 PipSoc tests** (multest/gcd/prime_cnt/
+mod_simple2) while multi-cycle passed all 51 — an RTL latent bug:
+
+- Root cause: `ldWbFiring` (LD direct regfile write) and `vWB`
+  (WB-stage ALU/CALL write) shared ONE write port with a priority mux
+  (`wrAddr = Mux(ldWb, ldRd, rWB_rd)`) — same cycle, different rds ⇒
+  the WB write was **silently dropped** (PipSoc trace: `wbf=1 wad=1`
+  next to `vwb=1` → the `MOV R2,R1` result never landed, `__mul16`
+  computed with dividend 0).
+- Reachability: a store-to-load bypass LD enters DATA_READY/writeback
+  at transfer+1 while its EX predecessor sits in WB at exactly that
+  cycle.  The old codegen shielded this for years: LDs were always
+  preceded by `ADDI R7, …` (exIdFwdHazard stalls the LD one cycle → WB
+  bubble) or by stores (no writeback).  `LD R1; MOV R2,R1; LD R1`
+  has no hazard between MOV and the second LD → collision.  A delayed
+  bus/UART response can likewise complete next to an unrelated ALU
+  writeback.
+- Fix: RegFile gets a second write port (8×16 FFs — registers, no
+  BRAM).  PipCore port 1 keeps the byte-identical original muxed
+  equation (all existing formal properties unchanged); port 2 carries
+  the WB write only when port 1 is occupied by the LD writeback
+  (`ldWbTerm && wbWrTerm`); same-address conflicts still resolve to
+  port 1 (unchanged WAW semantics: the bypassing LD is the younger
+  instruction).  Multi-cycle Core ties port 2 off (WRITEBACK state
+  serialises writes).
+- Formal: RegFile TC-RF-3b (port-2 readback under concurrent writes —
+  the machine-check that no write is dropped; free inputs make it
+  exhaustive), TC-RF-7 (same-address priority), `cover(wrEn && wr2En)`;
+  PipCore asserts pin the concurrent LD+WB wiring.
+
+Gates: `sbt test` 35/35; 51/51 on both emulators; coverage clean;
+bench cycle-neutral (18667/21014, 290583/174012, 68972/41504 —
+identical to baseline); F4PGA Fmax **101.38 MHz PASS at 100 MHz**
+(default seed; prior 103.83 — −2.45 MHz for the port-2 write mux,
+still clears the 100 MHz gate).
 - `isIoAddr` rewritten as `(addr[15:13] =/= 0) || &addr[12:2]` (pure
   boolean, exhaustively equivalent over all 65,536 addresses and
   formally asserted in both SoCs' TC `isIoAddr === (addr >= 0x1FFC)`):
@@ -255,13 +299,15 @@ IPC (profile with `bench.py` first):
 - 1-bit BTB for loop back-edges (compiler output is loop-heavy).
 - Revisit `Core.scala` role: debug/golden model only, not a perf path.
 
-Known limitation (sync data RAM): the LD unit's direct regfile writeback
-assumes an async response — with a 1-cycle-late (readSync) response the
-writeback lands after later instructions have retired (WAW inversion) and
-collides with the WB write port, silently dropping the ALU/CALL write
-(observed: `ADDI R7` frame updates; 8 loop tests fail).  Supporting
-sync RAM (BRAM) needs an in-order writeback redesign (e.g. stall ID→EX
-while a load is outstanding, or route load data through the WB port).
+Known limitation (sync data RAM): with a 1-cycle-late (readSync)
+response the LD writeback lands after later instructions have retired —
+a **WAW inversion** (the older LD's late write clobbers a younger
+register write, since port 1 = ldWb wins same-address conflicts).  The
+separate drop observed in the same experiment (LD writeback concurrent
+with the WB write → ALU/CALL write lost, e.g. `ADDI R7` frame updates)
+is FIXED by the dual-port RegFile above.  Supporting sync RAM (BRAM)
+still needs in-order writeback (e.g. stall ID→EX while a load is
+outstanding, or route load data through the WB port).
 
 Phase-3 exit gate: `bench-all` cycles/instr + nextpnr Fmax reported per
 change; no change accepted that regresses either without a recorded reason.
