@@ -157,12 +157,22 @@ case class PipCore() extends Component with CoreBusIoComponent {
   nextLdWbVld := ldWbVld
   private val ldPending = ldState === LdPhase.WAIT_BUS
   private val ldRspPending = ldState === LdPhase.DATA_READY
-  // Snapshot: captured at ID→EX entry of an LD (rd/byte/addr), consumed
-  // when its request fires. Single-driver regs (transfer writes, FSM reads).
+  // Snapshot: dest/LSB captured at ID→EX entry of an LD, consumed when its
+  // request fires (byte/addr moved to rBusByte/rBusAddr, which serve all
+  // mem ops).  Single-driver regs (transfer writes, FSM reads).
   private val snapRd = Reg(UInt(3 bits))
-  private val snapByte = Reg(Bool()) init False
   private val snapAddr0 = Reg(Bool()) init False
-  private val snapAddr = Reg(Bits(16 bits))
+  // Bus-issue address/lane — written by EVERY mem-op ID→EX transfer
+  // (LD/LDB and ST/STB) and read by the bus request directly.  Existing
+  // stalls keep it stable until the request fires: snapLdStall/snapStStall
+  // for a held snapshot, stStall for an unfired store.  It subsumes the
+  // old snapAddr and the snapPending/EX mux on req.addr: a direct FF
+  // output (not a mux) keeps the RAM address cone trivial — the F4PGA
+  // Yosys maps a muxed RAM address to RAM256X1S LUTRAM cells that
+  // nextpnr-xilinx cannot place ("no BELs remaining"), while a plain
+  // register maps to placeable RAM64M (Phase-1 Fmax netlists).
+  private val rBusAddr = Reg(Bits(16 bits))
+  private val rBusByte = Reg(Bool()) init False
   private val snapPending = ldState === LdPhase.SNAPSHOT
   private val nextLdState = LdPhase()
   nextLdState := ldState
@@ -346,11 +356,11 @@ case class PipCore() extends Component with CoreBusIoComponent {
       when(io.dataBus.req.fire) {
         nextLdRd := snapRd
         nextLdWbVld := True
-        nextLdIsByte := snapByte
+        nextLdIsByte := rBusByte
         nextLdAddr0 := snapAddr0
         when(io.dataBus.rsp.fire) {
           // Async RAM: response available same cycle as request — skip WAIT_BUS
-          nextLdData := Isa.laneSel(io.dataBus.rsp.payload, snapByte, snapAddr0)
+          nextLdData := Isa.laneSel(io.dataBus.rsp.payload, rBusByte, snapAddr0)
           nextLdState := LdPhase.DATA_READY
         } otherwise {
           // Sync RAM or UART: wait for response in WAIT_BUS
@@ -645,14 +655,15 @@ case class PipCore() extends Component with CoreBusIoComponent {
     (exFwdRtVal(7 downto 0) ## B(0, 8 bits)),
     (B(0, 8 bits) ## exFwdRtVal(7 downto 0)))
 
-  // Data bus request: LD issues from the snapshot (valid until it fires,
-  // even after the LD leaves EX); ST issues from EX with the registered
-  // handshake as before. Combinational.
-  io.dataBus.req.payload.addr := snapPending ? snapAddr.asUInt | rEX_effAddr.asUInt
+  // Data bus request: LD issues from the snapshot state (valid until it
+  // fires, even after the LD leaves EX); ST issues from EX with the
+  // registered handshake as before.  Address/lane come from the mem-op
+  // transfer registers (rBusAddr/rBusByte — registered, see declarations).
+  io.dataBus.req.payload.addr := rBusAddr.asUInt
   io.dataBus.req.payload.wrData := (rEX_byte && (rEX_type === InstrType.ST)) ?
     stByteData | exFwdRtVal
   io.dataBus.req.payload.wr := rEX_type === InstrType.ST
-  io.dataBus.req.payload.isByte := snapPending ? snapByte | rEX_byte
+  io.dataBus.req.payload.isByte := rBusByte
   io.dataBus.req.valid :=
     (snapPending && !ldRspPending) ||
       (rEX_type === InstrType.ST && !stFired)
@@ -767,11 +778,17 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // unconditionally (for the no-stall/no-flush case) and only gate the
   // actual transfer on vID.
   // Store-to-load bypass decision (Phase 3 IPC): word LD to the tracked
-  // word index, RAM-only. Decided atomically at transfer; completion data
-  // is latched below so later stores cannot disturb it. An unfired ST in
-  // EX excludes bypass via stStall (no transfer while ST unfired).
+  // word index. Decided atomically at transfer; completion data is latched
+  // below so later stores cannot disturb it. An unfired ST in EX excludes
+  // bypass via stStall (no transfer while ST unfired).
+  // Both isIoAddr terms are dropped (F4PGA timing): the tracker invariant
+  // `stTrackVld ⇒ !isIoAddr(stTrackAddr)` is formally asserted below, and
+  // [15:1] equality pins idEffAddr within ±1 of that address — so
+  // idEffAddr ≥ 0x1FFC would require the tracker to hold 0x1FFC/0x1FFD,
+  // which the invariant forbids (0x1FFC has word index 0xFFE ≠ 0xFFD).
+  // The removed `16'h1ffc <= idEffAddr` carry-chain compare was on the
+  // rID_rsAddr → idEffAddr → CE critical path (86.63 MHz).
   private val bypassTake = decoder.io.isLD && stTrackVld &&
-    !isIoAddr(idEffAddr(15 downto 0).asUInt) && !isIoAddr(stTrackAddr.asUInt) &&
     (idEffAddr(15 downto 1) === stTrackAddr(15 downto 1))
   when(!stallID && !exBrTaken && !halted) {
     when(vID) {
@@ -807,11 +824,15 @@ case class PipCore() extends Component with CoreBusIoComponent {
       // snapshot; DATA_READY entry is safe (writeback already fired —
       // see ldWbFiring). Skipped when the bypass below takes the LD
       // (bus path unused then).
+      // Bus-issue address/lane for any mem op (LD/LDB and ST/STB).
+      when(decoder.io.isLD || decoder.io.isLDB || decoder.io.isST ||
+        decoder.io.isSTB) {
+        rBusAddr := idEffAddr
+        rBusByte := idIsByteMem
+      }
       when((decoder.io.isLD || decoder.io.isLDB) && !bypassTake) {
         snapRd := (decoder.io.hasRd ? decoder.io.rdField | B"000").asUInt
-        snapByte := idIsByteMem
         snapAddr0 := idEffAddr(0)
-        snapAddr := idEffAddr
         nextLdState := LdPhase.SNAPSHOT
       }
       // Bypass completion (no bus): latch dest/valid/data now, DATA_READY
@@ -1087,7 +1108,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     when(pastValid() && resetn) {
       when(past(io.dataBus.rsp.fire) && past(ldState) === LdPhase.SNAPSHOT) {
         assert(ldData === Isa.laneSel(past(io.dataBus.rsp.payload),
-          past(snapByte), past(snapAddr0)))
+          past(rBusByte), past(snapAddr0)))
       }
       when(past(io.dataBus.rsp.fire) && past(ldState) === LdPhase.WAIT_BUS) {
         assert(ldData === Isa.laneSel(past(io.dataBus.rsp.payload), ldIsByte, ldAddr0))
@@ -1134,8 +1155,9 @@ case class PipCore() extends Component with CoreBusIoComponent {
     when(snapPending && !ldRspPending) {
       assert(io.dataBus.req.valid)
       assert(!io.dataBus.req.payload.wr)
-      assert(io.dataBus.req.payload.addr === snapAddr.asUInt)
-      assert(io.dataBus.req.payload.isByte === snapByte)
+      // Lane info recorded at transfer matches the issued address LSB
+      // (addr/isByte now come from the rBus* registers directly).
+      assert(rBusAddr(0) === snapAddr0)
     }
 
     // == ST (ISA §3.3 / §4.10): data bus write with correct addr + data   ==
@@ -1143,8 +1165,10 @@ case class PipCore() extends Component with CoreBusIoComponent {
     when(rEX_type === InstrType.ST) {
       assert(io.dataBus.req.valid === !stFired)
       assert(io.dataBus.req.payload.wr)
-      assert(io.dataBus.req.payload.addr === rEX_effAddr.asUInt)
-      assert(io.dataBus.req.payload.isByte === rEX_byte)
+      // Bus address/lane are the ST's own (rBus* latched at its transfer;
+      // stStall blocks later mem-op transfers until the request fires).
+      assert(rBusAddr === rEX_effAddr.asBits)
+      assert(rBusByte === rEX_byte)
       when(rEX_byte) {
         assert(io.dataBus.req.payload.wrData === stByteData)
       } otherwise {
@@ -1348,17 +1372,26 @@ case class PipCore() extends Component with CoreBusIoComponent {
         } otherwise {
           assert(snapPending)
           assert(snapRd === past(decoder.io.rdField).asUInt)
-          assert(snapByte === past(idIsByteMem))
-          // snapAddr latches the low 16 bits (modular address, same
-          // truncation as the rEX_effAddr := idEffAddr assignment).
-          assert(snapAddr === past(idEffAddr)(15 downto 0))
+          // rBusAddr/rBusByte latched the low 16 bits (modular address,
+          // same truncation as the rEX_effAddr := idEffAddr assignment).
+          assert(rBusAddr === past(idEffAddr)(15 downto 0))
+          assert(rBusByte === past(idIsByteMem))
           assert(snapAddr0 === past(idEffAddr(0)))
         }
+      }
+      // rBusAddr/rBusByte capture EVERY mem-op ID→EX transfer (LD/LDB and
+      // ST/STB) — the bus issues from these registers.
+      when(pastValid() && resetn && past(vID) && !past(stallID) &&
+        !past(exBrTaken) && !past(halted) &&
+        (past(decoder.io.isLD) || past(decoder.io.isLDB) ||
+          past(decoder.io.isST) || past(decoder.io.isSTB))) {
+        assert(rBusAddr === past(idEffAddr)(15 downto 0))
+        assert(rBusByte === past(idIsByteMem))
       }
       // Firing consumes the snapshot (dest/lane move to the completion regs).
       when(past(snapPending) && past(io.dataBus.req.fire)) {
         assert(ldRd === past(snapRd))
-        assert(ldIsByte === past(snapByte))
+        assert(ldIsByte === past(rBusByte))
         assert(ldAddr0 === past(snapAddr0))
         assert(ldWbVld)
       }
@@ -1417,6 +1450,13 @@ case class PipCore() extends Component with CoreBusIoComponent {
     }
     when(stTrackVld) {
       assert(!isIoAddr(stTrackAddr.asUInt))
+    }
+    // Redundancy of the dropped isIoAddr terms in bypassTake (timing
+    // optimisation): a bypassing LD can never target I/O — follows from
+    // the tracker invariant above + [15:1] address equality.  Asserted so
+    // the simplification is machine-checked, not just argued.
+    when(bypassTake) {
+      assert(!isIoAddr(idEffAddr(15 downto 0).asUInt))
     }
 
     // ======================================================================

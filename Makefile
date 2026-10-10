@@ -188,6 +188,17 @@ f4pga_tool = $(or \
 	$(realpath $(VENDOR_BIN)/$(1) 2>/dev/null), \
 	$(shell which $(1) 2>/dev/null))
 
+# Yosys: prefer the PATH build (linuxbrew 0.69+post 143eb14f9).  The
+# oss-cad-suite snapshot vendored in vendor/ (0.69+208 7b1913f4c) maps the
+# PipSoc async data RAM to RAM256X1S LUTRAM cells, which nextpnr-xilinx
+# (gatecat/xilinx-upstream chipdb) cannot place ("no BELs remaining to
+# implement cell type 'RAM256X1S'"), while the PATH build maps the same
+# RAM to placeable RAM64M (Phase-1 Fmax runs used exactly this binary).
+# Set F4PGA_YOSYS=<path> to override; an empty value falls back to the
+# vendor tool via f4pga_tool.
+F4PGA_YOSYS ?= $(or $(realpath $(shell which yosys 2>/dev/null)),)
+f4pga_yosys = $(or $(F4PGA_YOSYS),$(call f4pga_tool,yosys))
+
 F4PGA_DIR     := f4pga/build
 # Program baked into instrRom for FPGA bitstreams.  The FPGA flow generates
 # its own SystemVerilog copy in $(F4PGA_DIR) (2nd arg of risc.Soc/risc.PipSoc)
@@ -405,7 +416,7 @@ $(F4PGA_JSON): $(F4PGA_DIR)/Soc.sv
 	mkdir -p $(F4PGA_DIR)
 	@echo "[F4PGA] Synthesizing $(F4PGA_DEVICE):$(F4PGA_PART) top=Soc ..."
 	$(if $(call f4pga_tool,yosys), \
-		$(call f4pga_tool,yosys) \
+		$(call f4pga_yosys) \
 			-p "synth_xilinx -flatten -abc9 -arch xc7 -top Soc; \
 				delete {t:\$$scopeinfo}; \
 				opt_expr -keepdc; opt_clean -purge; \
@@ -462,7 +473,7 @@ $(F4PGA_DIR)/PipSoc.json: $(F4PGA_DIR)/PipSoc.sv
 	mkdir -p $(F4PGA_DIR)
 	@echo "[F4PGA] Synthesizing $(F4PGA_DEVICE):$(F4PGA_PART) top=PipSoc ..."
 	$(if $(call f4pga_tool,yosys), \
-		$(call f4pga_tool,yosys) \
+		$(call f4pga_yosys) \
 			-p "synth_xilinx -flatten -abc9 -arch xc7 -top PipSoc; \
 				delete {t:\$$scopeinfo}; \
 				opt_expr -keepdc; opt_clean -purge; \
