@@ -173,9 +173,19 @@ behavior change (50/50 byte-identical `.hex`) ✓. PHASE 2 CLOSED
 Baseline (v3.3 + Phase 2, `bench.py` cycles-to-completion):
 | bench | Multi-cycle | PipSoc | note |
 |:--|--:|--:|:--|
-| nop (1000 ADDI iters) | 18,667 | 27,977 | pipeline LOSES: LD-heavy body pays ldIssue + LD latency every iter |
+| nop (1000 ADDI iters) | 41,080 † | ≥26,048 † | pipeline WINS ~1.6×: overlap hides the per-iter LD latency the multi-cycle core pays serially |
 | alu (500 iters, incl. 500 `__mul16`) | 290,583 | 181,554 | call + runtime dominated |
 | mem (100-elem LD/ST) | 68,972 | 43,011 | 1.6× on streaming memory |
+† nop corrections: the originally recorded numbers (multi 18,667 /
+PipSoc 27,977, and the post-snapshot 21,014) were **artifacts** of
+bench.py's R1-only end predicate — bench_nop reloads `0x3E8` into R1
+every loop iteration, so "first step where R1==expected" oscillates and
+the binary search converged to a mid-loop transition.  Ground truth
+re-measured with the fixed predicate (see "bench.py monotone end
+predicate" below): multi 41,080; PipSoc post-snapshot RTL 26,048
+(pre-snapshot truth not recoverable without re-running old RTL).
+alu/mem numbers were validated (R1-only within ≤46 cycles of truth), so
+all recorded alu/mem deltas stand.
 Fmax baseline (post-route): **106.19 MHz PASS** (Phase-1 exit).
 Measurement fixes this pass: `bench.py` never passed the hex file
 (measured empty ROM), stale multi-cycle path, stale `bench_alu`
@@ -223,14 +233,18 @@ gate; snapshot+bypass trades depth for IPC):
   `ldWbFiring` registration cuts the regfile-WE cone — all deferred.
 - Recorded reason for the 106 → ~88 MHz regression (exit gate):
   bench gains nop 27,977→21,014 (−25%), alu 181,554→174,012 (−4%),
-  mem 43,011→41,504 (−3.5%).
+  mem 43,011→41,504 (−3.5%).  [Corrected later: the nop figure was a
+  method artifact — true post-snapshot nop is 26,048; the alu/mem
+  gains stand.]
 IPC (profile with `bench.py` first):
 - Capture `ldRd/ldIsByte/ldAddr0` in ID→EX transfer → delete
   `ldIssueStall` 1-bubble-per-load (`PipCore.scala:369-370`).
   **DONE** (`LdPhase.SNAPSHOT`, snapshot regs `snapRd/snapByte/
   snapAddr0/snapAddr`; bus is LD-unit-owned — request valid iff
   `snapPending && !ldRspPending`).  Bench (async RAM): nop
-  27,977→**21,014**, alu 181,554→**174,012**, mem 43,011→**41,504**.
+  27,977→**21,014**, alu 181,554→**174,012**, mem 43,011→**41,504**
+  (nop figure later corrected: R1-only predicate artifact, true
+  post-snapshot nop 26,048).
 - **DONE** store-to-load bypass: `{stTrackVld,stTrackAddr,stTrackData}`
   updated at ST fire (STB/I-O invalidate), word LD to the tracked word
   completes at ID→EX into DATA_READY without the bus
@@ -251,3 +265,31 @@ while a load is outstanding, or route load data through the WB port).
 
 Phase-3 exit gate: `bench-all` cycles/instr + nextpnr Fmax reported per
 change; no change accepted that regresses either without a recorded reason.
+
+### Change: bench.py monotone end-of-benchmark predicate (measurement fix)
+
+`bench.py` binary-searched "first step where R1 == expected".  bench_nop's
+loop reloads the expected value **every iteration** (`LDI R1, #0x3E8`), so
+the predicate oscillates and the search converged to a mid-loop
+transition: the recorded nop baselines (multi 18,667 / PipSoc 27,977,
+post-snapshot 21,014) were artifacts.  Ground truth re-measured with the
+fixed predicate (all 8 registers equal the final register file —
+monotone because the `_exit: JMP R5` spin loop never changes registers
+and mid-loop R7/R5 differ from the restored epilogue state), old cc.py:
+
+| bench | Multi-cycle | PipSoc (post-snapshot RTL) |
+|:--|--:|--:|
+| nop | **41,080** (was recorded 18,667) | **26,048** (was recorded 21,014) |
+| alu | 290,596 (recorded 290,583 ✓) | 174,058 (recorded 174,012 ✓) |
+| mem | 68,988 (recorded 68,972 ✓) | 41,511 (recorded 41,504 ✓) |
+
+Fix: `measure_cycles` binary-searches "whole register file == final
+state" (final state read at `max_steps`; expected-value check unchanged).
+alu/mem never collided (their expected values only occur at the end), so
+all previously recorded alu/mem numbers and deltas stand — R1-only was
+within ≤46 cycles of truth there.  Also corrected: the baseline note
+"pipeline LOSES on nop" was an artifact of the broken metric — the
+pipeline actually WINS ~1.6× on nop (41,080 → 26,048).  No RTL change.
+
+Gates: reproduces on both emulators; `bench.py --list` unchanged.
+

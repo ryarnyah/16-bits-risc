@@ -29,39 +29,46 @@ def compile_c(c_file):
 
 def run_steps(emulator_cmd, hex_file, steps):
     hex_path = os.path.join('examples', hex_file)
-    input_str = f's {steps}\nr 1\nc\nq\n'
+    input_str = f's {steps}\n' + ''.join(f'r {i}\n' for i in range(8)) + 'c\nq\n'
     try:
         r = subprocess.run(emulator_cmd + [hex_path], input=input_str,
             capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
         return None, None
-    r1 = None
+    regs = [None] * 8
     cycles = None
     for line in r.stdout.split('\n'):
-        m = re.search(r'R1 = 0x([0-9A-Fa-f]+)', line)
+        m = re.search(r'R(\d) = 0x([0-9A-Fa-f]+)', line)
         if m:
-            r1 = int(m.group(1), 16)
+            regs[int(m.group(1))] = int(m.group(2), 16)
         m = re.search(r'cycles=(\d+)', line)
         if m:
             cycles = int(m.group(1))
-    return r1, cycles
+    return regs, cycles
 
 def measure_cycles(emulator_cmd, hex_file, expected, max_steps=200000):
     lo, hi = 0, max_steps
-    # First verify benchmark finishes within max_steps
-    r1, _ = run_steps(emulator_cmd, hex_file, max_steps)
-    if r1 != expected:
-        raise RuntimeError(f'Benchmark failed at {max_steps} steps: got 0x{r1:X} expected 0x{expected:X}')
-    # Binary search for minimum steps that yield correct R1
+    # Final register state: reached at program end and stable in the
+    # _exit spin loop.
+    final, _ = run_steps(emulator_cmd, hex_file, max_steps)
+    if final[1] != expected:
+        raise RuntimeError(f'Benchmark failed at {max_steps} steps: got 0x{final[1]:X} expected 0x{expected:X}')
+    # Binary search for minimum steps where the whole register file matches
+    # the final state. R1 alone is NOT monotone: bench_nop's loop reloads
+    # the expected value every iteration (`LDI R1, #0x3E8`), so an R1-only
+    # predicate can converge to a mid-loop transition (it reported 18667
+    # for a program whose true end is step 41080). All registers together
+    # only match at the end: mid-loop R7/R5 differ from the restored
+    # epilogue state.
     while lo < hi:
         mid = (lo + hi) // 2
-        r1, _ = run_steps(emulator_cmd, hex_file, mid)
-        if r1 == expected:
+        regs, _ = run_steps(emulator_cmd, hex_file, mid)
+        if regs == final:
             hi = mid
         else:
             lo = mid + 1
-    # lo is the minimum steps where R1 is correct → benchmark cycles
-    return lo - 1  # R1 was set in the previous cycle
+    # lo is the minimum steps where the final state is visible → benchmark
+    return lo - 1  # state was reached in the previous cycle
 
 def main():
     parser = argparse.ArgumentParser(description='RISC Core Benchmark Suite')
