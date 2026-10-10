@@ -19,11 +19,8 @@ main:
     ADDI R6, R6, #2
 
     ADDI R1, R0, #7
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #3
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]

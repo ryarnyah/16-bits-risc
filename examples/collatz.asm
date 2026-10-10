@@ -24,19 +24,13 @@ collatz:
     ST R1, [R6 -1]
 .w1:
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #1
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .we2
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #2
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
@@ -46,19 +40,13 @@ collatz:
     ADDI R7, R7, #2
     ADDI R7, R7, #2
     LD R5, [R7]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     XOR R1, R0, R0
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR NZ, R1, .el3
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #2
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
@@ -72,11 +60,8 @@ collatz:
     JMPR .ei4
 .el3:
     ADDI R1, R0, #3
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]

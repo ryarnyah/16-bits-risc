@@ -625,6 +625,29 @@ class CGen:
         if not outer_end:
             self.emit_lbl(end)
 
+    def _r1_pure(self, e):
+        """True iff evaluating e writes only R1 (no R2-R4, no stack round-trip).
+
+        Lets binops/conditions stash the left operand in R2 with one MOV
+        instead of pushing it to memory: live nested state is always kept
+        on the memory stack, so R2 is dead by the time the left operand
+        has been evaluated, and an R1-pure right side cannot clobber it.
+        Phase-3 IPC (profiled with bench.py: 9 memory ops/loop iter)."""
+        if isinstance(e, (Const, VarRef, StringLit, SizeofExpr)):
+            return True
+        if isinstance(e, CastExpr):
+            return self._r1_pure(e.expr)
+        if isinstance(e, UnaryOp):
+            if e.op in ('-','~','!','*'):
+                return self._r1_pure(e.expr)
+            if e.op == '&':
+                # &arr[idx] pushes/pops (cc.py ArraySub addr path); &var
+                # is just _emit_addr (R1 only).
+                return not isinstance(e.expr, ArraySub) and \
+                    self._r1_pure(e.expr)
+            return False  # ++/-- may store via the far-offset R2 path
+        return False
+
     def _gen_cond(self, cond, target, invert):
         """Jump to target when condition is false (invert=True) or true (invert=False)."""
         cv = self._const_val(cond)
@@ -668,12 +691,20 @@ class CGen:
 
             # Binary comparison (v3.2: SLT/XOR + BR cc, R3 — R2 = left,
             # R1 = right; expression temps are dead, so R3 is free)
+            # Left into R2: one MOV when the right side is R1-pure,
+            # otherwise the memory stack round-trip (right eval may
+            # clobber R2).
             self._gen_expr(cond.left)
-            self.emit('    ST R1, [R7]')
-            self.emit('    ADDI R7, R7, #-2')
+            pure = self._r1_pure(cond.right)
+            if pure:
+                self.emit('    MOV R2, R1')
+            else:
+                self.emit('    ST R1, [R7]')
+                self.emit('    ADDI R7, R7, #-2')
             self._gen_expr(cond.right)
-            self.emit('    ADDI R7, R7, #2')
-            self.emit('    LD R2, [R7]')
+            if not pure:
+                self.emit('    ADDI R7, R7, #2')
+                self.emit('    LD R2, [R7]')
             # R2 = left, R1 = right
 
             if op in (TOK_EQ, TOK_NE):
@@ -861,22 +892,27 @@ class CGen:
                 if op == TOK_RSH:
                     self.emit(f'    SRAI R1, R1, #{s}')
                     return
-            # Load const into R2 for non-immediate ops
-            self.emit('    ST R1, [R7]')
-            self.emit('    ADDI R7, R7, #-2')
+            # Load const into R2 for non-immediate ops: left is already
+            # in R1 and R2 is dead (all live state is on the memory
+            # stack), so a MOV replaces the push/pop round-trip.
+            self.emit('    MOV R2, R1')
             self._load_r1(cv)
-            self.emit('    ADDI R7, R7, #2')
-            self.emit('    LD R2, [R7]')
             self._emit_binop_op(op)
             return
 
-        # General case
+        # General case: left into R2 — one MOV when the right side is
+        # R1-pure (cannot clobber R2), memory stack round-trip otherwise.
         self._gen_expr(e.left)
-        self.emit('    ST R1, [R7]')
-        self.emit('    ADDI R7, R7, #-2')
+        pure = self._r1_pure(e.right)
+        if pure:
+            self.emit('    MOV R2, R1')
+        else:
+            self.emit('    ST R1, [R7]')
+            self.emit('    ADDI R7, R7, #-2')
         self._gen_expr(e.right)
-        self.emit('    ADDI R7, R7, #2')
-        self.emit('    LD R2, [R7]')
+        if not pure:
+            self.emit('    ADDI R7, R7, #2')
+            self.emit('    LD R2, [R7]')
         self._emit_binop_op(op)
 
     def _emit_binop_op(self, op):
@@ -1032,11 +1068,18 @@ class CGen:
                     t, o = vi
                     base = 'R6' if t == 'l' else 'R0'
                     self._emit_ld(base, o)
-                    self.emit('    ST R1, [R7]')
-                    self.emit('    ADDI R7, R7, #-2')
+                    # Left in R2: MOV for an R1-pure rhs, else the
+                    # memory stack round-trip (rhs eval may clobber R2).
+                    pure = self._r1_pure(e.rhs)
+                    if pure:
+                        self.emit('    MOV R2, R1')
+                    else:
+                        self.emit('    ST R1, [R7]')
+                        self.emit('    ADDI R7, R7, #-2')
                     self._gen_expr(e.rhs)
-                    self.emit('    ADDI R7, R7, #2')
-                    self.emit('    LD R2, [R7]')
+                    if not pure:
+                        self.emit('    ADDI R7, R7, #2')
+                        self.emit('    LD R2, [R7]')
                     alu = {TOK_PLUS: 'ADD', TOK_MINUS: 'SUB', TOK_AND: 'AND',
                            TOK_PIPE: 'OR', TOK_CARET: 'XOR'}
                     if bo in alu:

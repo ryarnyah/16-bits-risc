@@ -25,11 +25,8 @@ main:
     ADDI R1, R1, #5
     ST R1, [R6 -2]
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -1]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -3]
@@ -39,19 +36,13 @@ main:
     ORI R1, R1, #1
     ST R1, [R6 -5]
     LD R1, [R6 -5]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -3]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
     ST R1, [R6 -6]
     LD R1, [R6 -6]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -1]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SUB R1, R2, R1
 main_epi:
     ADDI R7, R7, #12

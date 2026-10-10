@@ -108,11 +108,8 @@ main:
     ST R1, [R7]
     ADDI R7, R7, #-2
     LD R1, [R6 -5]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #1
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SUB R1, R2, R1
     ADDI R7, R7, #2
     LD R2, [R7]

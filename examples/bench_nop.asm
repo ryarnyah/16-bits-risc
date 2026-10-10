@@ -25,11 +25,8 @@ main:
     ST R1, [R6 -1]
 .fc1:
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x03E8
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .fe3
     LD R1, [R6 -2]

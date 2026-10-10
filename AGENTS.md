@@ -32,7 +32,9 @@
   recorded nop numbers were R1-only artifacts — truth: multi 41080,
   PipSoc 26048; alu 290583/181554 and mem 68972/43011 stand);
   snapshot + store-to-load bypass DONE (PipSoc alu 174012, mem 41504);
-  RegFile dual write ports DONE (correctness, Key Fix 25); Fmax
+  RegFile dual write ports DONE (correctness, Key Fix 25); cc.py MOV
+  handoff DONE (Key Fix 26: nop/alu/mem −19.5/−11.0/−3.5% multi-cycle,
+  −19.2/−11.5/−3.6% PipSoc); Fmax
   106.19 → ~88-90 FAIL@100 (critical-path analysis in PLAN.md, bypass
   word compare = the delta) **recovered to 101.38 MHz PASS** by the
   dual-port netlist
@@ -356,6 +358,26 @@
     - Gates: `sbt test` 35/35; 51/51 both emulators; coverage clean;
       bench cycle-neutral; F4PGA **101.38 MHz PASS at 100 MHz**
       (recovered the Phase-3 Fmax regression — new netlist placement).
+
+26. **cc.py MOV handoff for R1-pure right operands** (compiler opt;
+    found via `bench_nop` profiling — it was compiler-bound at 13
+    instructions / 9 mem ops per iteration):
+    - When the right side of a binop/condition/compound assignment
+      writes only R1 (const, VarRef, StringLit, sizeof, cast, pure
+      unop), the left operand moves to R2 via one `MOV R2, R1` instead
+      of the 4-instruction / 2-memory-op stack round-trip; register
+      state at the op is byte-identical to the old pop.  Applied in
+      `_gen_cond`, `_gen_binop`, `_gen_assign`.
+    - First attempt failed 4 PipSoc tests → uncovered the latent
+      write-port collision of Key Fix 25; with the RTL fixed, all
+      green.
+    - Bench (true cycles, all-regs predicate, old → new):
+      nop/alu/mem **−19.5% / −11.0% / −3.5%** multi-cycle,
+      **−19.2% / −11.5% / −3.6%** PipSoc.
+    - Gates: 51/51 both emulators, coverage clean, no RTL change;
+      Fmax re-measured end-to-end with the new-codegen ROM:
+      **101.38 MHz PASS** (identical to the dual-port measurement —
+      ROM-content noise only).
 
 ### Verification Results
 

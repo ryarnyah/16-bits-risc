@@ -339,3 +339,29 @@ pipeline actually WINS ~1.6× on nop (41,080 → 26,048).  No RTL change.
 
 Gates: reproduces on both emulators; `bench.py --list` unchanged.
 
+### Change: cc.py MOV handoff for R1-pure right operands
+
+When the right side of a binop/condition/compound assignment writes only
+R1 (constant, VarRef, sizeof, cast, pure unop), the left operand moves
+to R2 with a single `MOV R2, R1` instead of the 4-instruction /
+2-memory-op stack round-trip (`ST R1,[R7]; ADDI R7,#-2; …; ADDI R7,#2;
+LD R2,[R7]`).  Register state at the operation is byte-identical to the
+old pop.
+
+- First attempt FAILED 4 PipSoc tests (multest/gcd/prime_cnt/mod_simple2)
+  while multi-cycle passed → uncovered the latent shared-write-port
+  collision fixed by the dual-port RegFile above (the new codegen's
+  `LD R1; MOV R2,R1; LD R1` sequence reaches the LD/WB same-cycle
+  writeback collision that the old push/pop codegen never formed).
+- Bench with the fixed predicate (cycles-to-completion, old → new):
+
+| bench | Multi-cycle | Δ | PipSoc | Δ |
+|:--|--:|--:|--:|--:|
+| nop | 41,080 → 33,071 | **−19.5%** | 26,048 → 21,042 | **−19.2%** |
+| alu | 290,596 → 258,581 | **−11.0%** | 174,058 → 154,048 | **−11.5%** |
+| mem | 68,988 → 66,571 | −3.5% | 41,511 → 40,000 | −3.6% |
+
+Gates: 51/51 on both emulators (incl. the 4 formerly failing), coverage
+clean, no RTL change. Fmax re-measured end-to-end with the regenerated
+(new-codegen) `fib_uart.hex`: **101.38 MHz PASS at 100 MHz** — identical
+to the dual-port measurement (ROM-content noise only).

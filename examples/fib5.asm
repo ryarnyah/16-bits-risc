@@ -21,11 +21,8 @@ fib:
     ST R2, [R6 -1]
 
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #2
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .el1
     LD R1, [R6 -1]
@@ -33,11 +30,8 @@ fib:
 .el1:
 .ei2:
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #1
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SUB R1, R2, R1
     ST R1, [R7]
     ADDI R7, R7, #-2
@@ -47,11 +41,8 @@ fib:
     ST R1, [R7]
     ADDI R7, R7, #-2
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #2
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SUB R1, R2, R1
     ST R1, [R7]
     ADDI R7, R7, #-2

@@ -26,11 +26,8 @@ main:
     ST R1, [R6 -16]
 .fc1:
     LD R1, [R6 -16]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #15
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .fe3
     ADDI R1, R6, #-30
@@ -58,11 +55,8 @@ main:
     ST R1, [R6 -16]
 .fc4:
     LD R1, [R6 -16]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #15
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .fe6
     LD R1, [R6 -17]

@@ -26,17 +26,11 @@ main:
     LDI R1, #0x012C
     ST R1, [R6 -3]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -3]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
     ST R1, [R6 -4]
     LD R1, [R6 -4]

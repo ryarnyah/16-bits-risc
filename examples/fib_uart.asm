@@ -21,11 +21,8 @@ fib:
     ST R2, [R6 -1]
 
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #2
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .el1
     LD R1, [R6 -1]
@@ -33,11 +30,8 @@ fib:
 .el1:
 .ei2:
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #1
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SUB R1, R2, R1
     ST R1, [R7]
     ADDI R7, R7, #-2
@@ -47,11 +41,8 @@ fib:
     ST R1, [R7]
     ADDI R7, R7, #-2
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #2
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SUB R1, R2, R1
     ST R1, [R7]
     ADDI R7, R7, #-2
@@ -167,19 +158,13 @@ print_dec:
     ST R2, [R6 -1]
 
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #10
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .el5
     LDI R1, #0x0030
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -1]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
     ST R1, [R7]
     ADDI R7, R7, #-2
@@ -191,11 +176,8 @@ print_dec:
 .el5:
 .ei6:
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #10
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
@@ -214,11 +196,8 @@ print_dec:
     ST R1, [R7]
     ADDI R7, R7, #-2
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #10
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
@@ -261,29 +240,20 @@ read_dec:
     CALLR R5, getchar
     ST R1, [R6 -2]
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0030
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .el11
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #10
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR NZ, R1, .lo15
     JMPR .lor16
 .lo15:
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #13
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR NZ, R1, .el13
 .lor16:
@@ -300,11 +270,8 @@ read_dec:
     JMPR .ei12
 .el11:
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0039
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R1, R2
     BR Z, R3, .el17
     JMPR .ei12
@@ -316,11 +283,8 @@ read_dec:
     LD R2, [R7]
     CALLR R5, putchar
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #10
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
@@ -333,11 +297,8 @@ read_dec:
     ST R1, [R7]
     ADDI R7, R7, #-2
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0030
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SUB R1, R2, R1
     ADDI R7, R7, #2
     LD R2, [R7]

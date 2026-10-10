@@ -29,65 +29,41 @@ main:
     ST R1, [R6 -1]
 .fc1:
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x01F4
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .fe3
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -3]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
     ST R1, [R6 -2]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -4]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -3]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SUB R1, R2, R1
     ST R1, [R6 -4]
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x007F
-    ADDI R7, R7, #2
-    LD R2, [R7]
     AND R1, R2, R1
     ST R1, [R6 -2]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x00F0
-    ADDI R7, R7, #2
-    LD R2, [R7]
     OR R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -4]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #3
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]

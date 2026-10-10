@@ -22,11 +22,8 @@ main:
     XOR R1, R0, R0
     ST R1, [R6 -1]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     XOR R1, R0, R0
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el1
     LDI R1, #0x0063
@@ -34,11 +31,8 @@ main:
 .el1:
 .ei2:
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     XOR R1, R0, R0
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR NZ, R1, .el3
     ADDI R1, R0, #5
@@ -46,11 +40,8 @@ main:
 .el3:
 .ei4:
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     XOR R1, R0, R0
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .el5
     LDI R1, #0x0063
@@ -58,11 +49,8 @@ main:
 .el5:
 .ei6:
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #10
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .el7
     LD R1, [R6 -1]

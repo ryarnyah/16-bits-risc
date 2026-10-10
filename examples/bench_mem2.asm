@@ -40,11 +40,8 @@ main:
     LDI R1, #-202
     ADD R1, R1, R6
     LD R1, [R1 + 0]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0064
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .fe3
     LDI R1, #-200
@@ -93,11 +90,8 @@ main:
     LDI R1, #-202
     ADD R1, R1, R6
     LD R1, [R1 + 0]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0064
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .fe6
     LDI R1, #-204

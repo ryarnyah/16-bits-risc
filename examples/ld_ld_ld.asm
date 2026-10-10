@@ -113,17 +113,11 @@ main:
     LD R1, [R1 + 0]
     ST R1, [R6 -7]
     LD R1, [R6 -5]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -6]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -7]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
     ST R1, [R6 -8]
     LD R1, [R6 -8]

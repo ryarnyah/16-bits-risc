@@ -25,19 +25,13 @@ main:
     ST R1, [R6 -2]
 .w1:
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0064
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R1, R2
     BR NZ, R3, .we2
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -1]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
     ST R1, [R6 -2]
     LD R1, [R6 -1]
