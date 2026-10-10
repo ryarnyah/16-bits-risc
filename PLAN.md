@@ -182,11 +182,48 @@ Measurement fixes this pass: `bench.py` never passed the hex file
 expectation (`0x1428`, ground truth `0x2E0B` via python model),
 `max_steps` 200k→600k (multi-cycle `bench_alu` needs ~290k).
 
-Fmax (re-baseline after v3; was 103.83 MHz):
-- Register `dataBus.req` (skid) — cuts SoC `isIoAddr` + RAM-addr fanout.
-- `instrRsp.ready` decoupled from `stallID` cone (ready=True + discard,
-  already proven for `exBrTaken`).
-- Register `ldWbFiring` into regfile enable path.
+Fmax (Phase-3 outcome — recorded regression with reason, per the exit
+gate; snapshot+bypass trades depth for IPC):
+
+| stage | post-route Fmax |
+|:--|--:|
+| Phase-1 exit (v3.3 + Phase 2) | **106.19 MHz PASS** |
+| after snapshot + bypass (bus cone) | 86.63 FAIL |
+| + `rBusAddr`/`rBusByte` bus-issue regs | 90.13 FAIL |
+| + `bypassTake` isIoAddr-term removal | (cone cleared) |
+| + boolean `isIoAddr` rewrite | **87.57 FAIL** (default seed) |
+
+- Tool-level sweeps are exhausted: seeds 2-5 on the pre-boolean netlist
+  79.08-91.31; `--placer sa` crashes in nextpnr-xilinx (exit 255);
+  `--placer-budgets` 83.27; `--placer-heap-timingweight` 10/100 =
+  88.62/87.57.  ~88-90 MHz is the structural ceiling of this netlist.
+- Critical path (twin ~11.3 ns cones, routing-dominated ~8 ns):
+  `rID_rsAddr → regfile/forwarding → idEffAddr CARRY4 → (idEffAddr[15:1]
+  == stTrackAddr[15:1]) → { CE of snapRd/snapAddr0 (when l833),
+  ldState/ldWbVld next-state (bypassTake) }`.  The bypass word compare
+  (2 LUT levels + routing after the adder) is exactly the delta vs
+  Phase 1.
+- Why it is not fixable without an IPC loss (analysed this pass):
+  the bypass MUST decide atomically at ID→EX transfer (the tracker can
+  change in the transfer cycle via an ST fire; stStall's one-cycle
+  shadow is what makes the pre-edge tracker read committed); a
+  fire-time (SNAPSHOT) decision saves nothing because the async RAM
+  responds in the SNAPSHOT cycle already — the bypass's entire value is
+  skipping that cycle; comparing `rs == tracked - imm - c0` only
+  re-serialises the same carry depth through the `c0 = rs[0]&imm[0]`
+  term; narrowing the compare to the 12-bit RAM word index does not
+  reduce LUT levels (both 2) and lengthens the carry to bit 12.
+- `isIoAddr` rewritten as `(addr[15:13] =/= 0) || &addr[12:2]` (pure
+  boolean, exhaustively equivalent over all 65,536 addresses and
+  formally asserted in both SoCs' TC `isIoAddr === (addr >= 0x1FFC)`):
+  removes the LUT+CARRY4 `>=` compare from the SoC response cone; the
+  rewrite is Fmax-neutral overall (the ID cone became worst instead).
+- Remaining PLAN levers do not address the critical cone: the `dataBus.req`
+  skid + `instrRsp.ready` decoupling cut the SoC-response cone, and
+  `ldWbFiring` registration cuts the regfile-WE cone — all deferred.
+- Recorded reason for the 106 → ~88 MHz regression (exit gate):
+  bench gains nop 27,977→21,014 (−25%), alu 181,554→174,012 (−4%),
+  mem 43,011→41,504 (−3.5%).
 IPC (profile with `bench.py` first):
 - Capture `ldRd/ldIsByte/ldAddr0` in ID→EX transfer → delete
   `ldIssueStall` 1-bubble-per-load (`PipCore.scala:369-370`).

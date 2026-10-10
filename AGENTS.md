@@ -29,7 +29,10 @@
   inline-formal confirmed. All gates green throughout.
 - **Phase 3 (speed) MEASURING:** `bench.py` fixed (hex arg, expectation,
   steps); baseline PipSoc nop/alu/mem = 27977/181554/43011 cycles;
-  pipeline loses nop to multi-cycle (LD latency) → ldIssue removal is #1
+  snapshot + store-to-load bypass DONE (21014/174012/41504);
+  Fmax recorded regression 106.19 → ~88-90 MHz FAIL@100 with full
+  critical-path analysis in PLAN.md (bypass word compare off the ID
+  effective-address adder is the delta; fixable only with an IPC loss)
 
 - **Package:** `risc`
 - **Bus:** 8-bit Stream cmd/rsp + ack, per INSTRUCTIONS.md
@@ -302,6 +305,30 @@
     - Verified: `make test-programs-all` **49/49** on both emulators
       (all 49 reassembled with the fixed assembler); no Scala/RTL
       changes → formal unaffected.
+
+24. **Phase-3 F4PGA placement/timing round** (`PipCore.scala`,
+    `PipSoc.scala`, `Soc.scala`, `Makefile`; commits `f28a8ce` + this):
+    - Root cause of `nextpnr: no BELs remaining for $buf/RAM256X1S`:
+      Yosys maps the muxed async data-RAM address
+      (`snapPending ? snapAddr : rEX_effAddr`) to RAM256X1S LUTRAM that
+      the gatecat/xilinx-upstream chipdb cannot place; the oss-cad-suite
+      yosys snapshot (7b1913f4c) does this, the PATH linuxbrew build
+      (143eb14f9, Phase-1 proven) maps plain register addresses to
+      placeable RAM64M.  Fixes: dedicated bus-issue registers
+      `rBusAddr`/`rBusByte` (every mem-op ID→EX transfer, driving
+      `req.addr`/`isByte` directly — subsumes `snapAddr`/`snapByte`),
+      and `F4PGA_YOSYS` pin in the Makefile.
+    - `bypassTake` drops both redundant `isIoAddr` terms (tracker
+      invariant `stTrackVld ⇒ !isIoAddr(stTrackAddr)` formally
+      asserted; `[15:1]` equality pins the address within ±1) —
+      new assert `bypassTake ⇒ !isIoAddr(idEffAddr)` machine-checks it.
+    - `isIoAddr` rewritten as pure boolean
+      `(addr[15:13] =/= 0) || &addr[12:2]` in both SoCs (equivalence
+      asserted in both formals); `Soc` ROM init pads hex content to
+      4096 words (pre-existing `make f4pga` Soc abort on short hex).
+    - Tool sweeps: seeds 79-91, `--placer sa` broken, `--placer-budgets`
+      83.27, timingweight variants 87.6-88.6 — structural ceiling
+      ~88-90 MHz; full analysis + recorded IPC trade in PLAN.md.
 
 ### Verification Results
 

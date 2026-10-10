@@ -44,7 +44,15 @@ private val core = PipCore()
   io.uartTx <> uart.io.tx
   uart.io.rx <> io.uartRx
 
-  private val isIoAddr = core.io.dataBus.req.addr >= 0x1FFC
+  // I/O region = [0x1FFC, 0xFFFF].  Written as pure boolean logic —
+  // addr ≥ 0x1FFC ⟺ addr[15:13] ≠ 0 (⇒ addr ≥ 0x2000) ∨ ∧addr[12:2]
+  // (⇒ addr ∈ [0x1FFC, 0x1FFF], bits 1:0 free).  Exhaustively equivalent
+  // to `addr >= 0x1FFC` over all 65,536 addresses (and asserted in the
+  // SoC formal below), but maps to 2 LUT levels instead of the
+  // LUT+CARRY4 chain the `>=` constant compare inferred — the compare
+  // sat on the rBusAddr → ramRspVld → ldData critical path (90.13 MHz).
+  private val isIoAddr = (core.io.dataBus.req.addr(15 downto 13) =/= 0) ||
+    core.io.dataBus.req.addr(12 downto 2).andR
   private val dataWordAddr = core.io.dataBus.req.addr(15 downto 1).resize(log2Up(4096))
 
   core.io.dataBus.req.ready := Mux(isIoAddr,

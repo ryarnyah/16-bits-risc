@@ -35,7 +35,10 @@ class Soc(hexPath: String = "") extends Component {
         .map(l => BigInt(l.trim, 16))
         .toSeq
     } finally { source.close() }
-    instrRom.initBigInt(words)
+    // Pad to the full ROM size: initBigInt asserts content == wordCount
+    // (the same padding PipSoc applies; without it the f4pga Soc flow
+    // aborts on any hex shorter than 4096 words).
+    instrRom.initBigInt(words.padTo(4096, BigInt(0)))
   }
 
   // Tie off Core debug bus (not exposed at SoC level)
@@ -53,7 +56,11 @@ class Soc(hexPath: String = "") extends Component {
   uart.io.rx <> io.uartRx
 
   // ── Address decode ──
-  private val isIoAddr = core.io.dataBus.req.addr >= 0x1FFC
+  // I/O region [0x1FFC, 0xFFFF] in pure boolean form (equivalent to
+  // `addr >= 0x1FFC`, machine-checked by TC-SOC-8's equivalence assert);
+  // same rewrite as PipSoc — keeps both SoCs' decode identical.
+  private val isIoAddr = (core.io.dataBus.req.addr(15 downto 13) =/= 0) ||
+    core.io.dataBus.req.addr(12 downto 2).andR
   private val dataWordAddr = core.io.dataBus.req.addr(15 downto 1).resize(log2Up(4096))
 
   // ── Data bus request: accept ──
