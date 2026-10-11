@@ -484,11 +484,29 @@ case class PipCore() extends Component with CoreBusIoComponent {
     stStall || (exIdFwdHazard && !rWbHasExRes)
   private val stallIF = stallID || stallLdiId
 
+  // =========================================================================
+  // Interrupt entry (Phase 4, zero-ISA — ISA-3 §10.4)
+  // =========================================================================
+  // Accept only when ID holds an instruction that would transfer to EX this
+  // cycle: that ID instruction is the next unexecuted one (older work in
+  // EX/WB drains normally), so it is squashed and its address reported as
+  // the EPC link value.  Gated by !stallID (no half-transferred state),
+  // !rEX_brTaken (an older branch flush wins), !halted (HALT stays frozen —
+  // ISA-3 §6.6) and !dbgFlush (debug commands win).  An LD whose bus
+  // transaction is still in flight may be left behind safely: the LD FSM
+  // and its writeback are rEX_type-independent, and single-outstanding is
+  // enforced ID-side (ldBusyStall / snapLdStall block a second request).
+  private val irqTake = io.irq && vID && !stallID && !rEX_brTaken &&
+    !halted && !dbgFlush
+  io.irqAccepted := irqTake
+  io.irqLink := rID_pc.asBits
+
   // EX retained its instruction iff the ID→EX block did not run (stallID or
   // halted) and nothing cleared it (exBrTaken, debug flush).  hasRd/rd/=0
   // are included so that rWbHasExRes ⇒ fwdFromWb: whenever the flag is set,
   // idFwd*WbSel is guaranteed to select rWB_result — which is what lets the
-  // hazard above clear.
+  // hazard above clear.  (irqTake is not a retention case: it empties EX
+  // directly in its redirect block, so no stale occupant survives.)
   rWbHasExRes := exWbFired && rEX_hasRd && rEX_rd =/= 0 &&
     !rEX_brTaken && (stallID || halted) && !dbgFlush
 
@@ -623,6 +641,27 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // Placed after the IF block so it overrides nextVID := True.
   when(halted) {
     nextVID := False
+  }
+
+  // Interrupt redirect (Phase 4): squash the ID instruction (its address
+  // was already reported as the link value this cycle) and fetch from the
+  // vector.  Placed after the IF block so a same-cycle fetch is overridden
+  // (mirror of the exBrTaken discard — note the async ROM returns the
+  // *current* instrAddr, i.e. the vector, from the next cycle on, so no
+  // stale in-flight response exists).  irqTake excludes exBrTaken, so the
+  // branch redirect below can never conflict.
+  when(irqTake) {
+    nextPC := io.irqVector.asUInt
+    nextVID := False
+    nextLdiPending := False
+    // Empty EX as the vID=0 otherwise-branch of ID→EX would: the occupant
+    // has just retired (exWbFired / stFired / LD-FSM paths are all
+    // independent of this), and leaving it stale for one extra cycle would
+    // re-fire its EX→WB commit (double writeback of a recomputed result)
+    // and re-arm a fired ST's request (req.valid = ST && !stFired).
+    // An in-flight LD is unaffected: its FSM, request and writeback are
+    // snapshot/ldState-driven, not rEX_type-driven.
+    nextREXtype := InstrType.EMPTY
   }
 
   // =========================================================================
@@ -790,7 +829,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // rID_rsAddr → idEffAddr → CE critical path (86.63 MHz).
   private val bypassTake = decoder.io.isLD && stTrackVld &&
     (idEffAddr(15 downto 1) === stTrackAddr(15 downto 1))
-  when(!stallID && !exBrTaken && !halted) {
+  when(!stallID && !exBrTaken && !halted && !irqTake) {
     when(vID) {
       // Clear vID when IF→ID is not also firing (otherwise the new
       // instruction from IF would be lost).
@@ -993,7 +1032,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     // PC progression — ISA.md §4.3
     // ======================================================================
     when(pastValid() && resetn) {
-      when(past(vID) && !past(exBrTaken) && !past(stallIF)) {
+      when(past(vID) && !past(exBrTaken) && !past(stallIF) && !past(irqTake)) {
         assert(pc === past(pc) + 2 || pc === past(pc))
       }
     }
@@ -1053,7 +1092,9 @@ case class PipCore() extends Component with CoreBusIoComponent {
     // Pipeline progression: ID → EX
     // ======================================================================
     when(pastValid() && resetn) {
-      when(past(vID) && !past(stallID) && !past(exBrTaken) && !past(halted)) {
+      // Phase 4: irqTake squashes ID instead of transferring (redirect).
+      when(past(vID) && !past(stallID) && !past(exBrTaken) && !past(halted) &&
+        !past(irqTake)) {
         // v2.1 §2.6/§5.4: reserved encodings and HALT transfer as EMPTY
         // (no architectural effect); everything else must occupy EX.
         assert(rEX_type =/= InstrType.EMPTY ||
@@ -1249,7 +1290,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     // == v2.1 §5.4: HALT never executes — HALT words transfer as EMPTY   ==
     when(pastValid() && resetn) {
       when(past(vID) && past(decoder.io.isHALT) && !past(stallID) &&
-        !past(exBrTaken)) {
+        !past(exBrTaken) && !past(irqTake)) {
         assert(halted)
         assert(rEX_type === InstrType.EMPTY)
       }
@@ -1283,7 +1324,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     // == v2.1 §2.6: reserved encodings transfer as EMPTY (no writeback)  ==
     when(pastValid() && resetn) {
       when(past(vID) && past(decoder.io.isReserved) && !past(stallID) &&
-        !past(exBrTaken) && !past(halted)) {
+        !past(exBrTaken) && !past(halted) && !past(irqTake)) {
         assert(rEX_type === InstrType.EMPTY)
         assert(!rEX_hasRd)
       }
@@ -1386,12 +1427,33 @@ case class PipCore() extends Component with CoreBusIoComponent {
     }
 
     // ======================================================================
+    // Phase 4 interrupt entry (zero-ISA — ISA-3 §10.4)
+    // ======================================================================
+    when(pastValid() && resetn) {
+      /* TC-IRQ-P1: acceptance squashes the ID instruction — ID is empty
+       * one cycle later (the vector instruction refills it after that). */
+      when(past(irqTake)) {
+        assert(!vID)
+      }
+      /* TC-IRQ-P2: the link value reported for EPC is the PC of the
+       * squashed instruction — the next unexecuted one. */
+      when(io.irqAccepted) {
+        assert(io.irqLink === rID_pc.asBits)
+      }
+      /* TC-IRQ-P3: acceptance redirects fetch to the vector on the next
+       * cycle (reset excluded — it overrides PC in the accept cycle). */
+      when(past(resetn) && past(irqTake)) {
+        assert(pc === past(io.irqVector).asUInt)
+      }
+    }
+
+    // ======================================================================
     // Temporal: LD snapshot capture + fire + single-outstanding (Phase 3)
     // ======================================================================
     when(pastValid() && resetn) {
       // ID→EX of an LD either snapshots (bus path) or bypass-completes.
       when(past(vID) && (past(decoder.io.isLD) || past(decoder.io.isLDB)) &&
-        !past(stallID) && !past(exBrTaken) && !past(halted)) {
+        !past(stallID) && !past(exBrTaken) && !past(halted) && !past(irqTake)) {
         when(past(bypassTake)) {
           // Bypass: DATA_READY + valid writeback + latched data/rd now.
           assert(ldState === LdPhase.DATA_READY)
@@ -1415,7 +1477,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
       // rBusAddr/rBusByte capture EVERY mem-op ID→EX transfer (LD/LDB and
       // ST/STB) — the bus issues from these registers.
       when(pastValid() && resetn && past(vID) && !past(stallID) &&
-        !past(exBrTaken) && !past(halted) &&
+        !past(exBrTaken) && !past(halted) && !past(irqTake) &&
         (past(decoder.io.isLD) || past(decoder.io.isLDB) ||
           past(decoder.io.isST) || past(decoder.io.isSTB))) {
         assert(rBusAddr === past(idEffAddr)(15 downto 0))
@@ -1456,7 +1518,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
       // writeback fired this cycle (direct path, before the overwrite).
       when(past(ldRspPending) && past(ldWbVld) && past(ldRd) =/= 0 &&
         past(vID) && (past(decoder.io.isLD) || past(decoder.io.isLDB)) &&
-        !past(stallID) && !past(exBrTaken) && !past(halted)) {
+        !past(stallID) && !past(exBrTaken) && !past(halted) && !past(irqTake)) {
         assert(regFile.io.wrEn)
         assert(regFile.io.wrAddr === past(ldRd))
       }
@@ -1504,6 +1566,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     cover(rEX_type === InstrType.BR && exBrTaken)
     cover(rEX_type === InstrType.BR && !exBrTaken)
     cover(loadUseHazard)
+    cover(irqTake)
     cover(ldBusyStall)
     cover(snapLdStall)
     cover(snapStStall)

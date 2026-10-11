@@ -30,6 +30,12 @@ class SimPipCore extends Component {
   core.io.bus.cmd.valid := False
   core.io.bus.cmd.payload := 0
   core.io.bus.rsp.ready := False
+
+  // Phase 4: interrupt inputs tied off — these sim tests exercise the
+  // non-interrupt datapath (the interrupt path is covered end-to-end by
+  // examples/irq_test.asm on both emulators and by the BMC assertions).
+  core.io.irq := False
+  core.io.irqVector := 0
 }
 
 object PipCoreSim {

@@ -63,14 +63,55 @@ class Soc(hexPath: String = "") extends Component {
     core.io.dataBus.req.addr(12 downto 2).andR
   private val dataWordAddr = core.io.dataBus.req.addr(15 downto 1).resize(log2Up(4096))
 
+  // ── Interrupt controller (Phase 4, zero-ISA — ISA-3 §10.4) ──
+  // I/O registers carved out of the I/O region: 0x2000 CTRL (bit0 IMASK,
+  // bit1 SWIRQ) and 0x2002 EPC (read-only window onto the core's link
+  // value).  Sources: UART RX non-empty (level) and the software bit.
+  private val isIntCtrl = isIoAddr && (core.io.dataBus.req.addr(15 downto 1) === 0x1000)
+  private val isEpc     = isIoAddr && (core.io.dataBus.req.addr(15 downto 1) === 0x1001)
+  private val isIntReg  = isIntCtrl || isEpc
+  private val imask = Reg(Bool()) init False
+  private val swIrq = Reg(Bool()) init False
+  private val epcReg = Reg(Bits(16 bits)) init 0
+  private val intPending = uart.io.rxVld || swIrq
+
+  core.io.irq := intPending && imask
+  core.io.irqVector := B(0x0008, 16 bits)
+
+  // Registered CTRL/EPC read response — same 1-cycle latency as the sync
+  // data RAM, so the core consumes it exactly like any RAM read.
+  private val intRspVld = Reg(Bool()) init False
+  private val intRdData = Reg(Bits(16 bits))
+  when(core.io.dataBus.rsp.fire) {
+    intRspVld := False
+  }
+  when(core.io.dataBus.req.fire && isIntReg && !core.io.dataBus.req.wr) {
+    intRspVld := True
+    intRdData := Mux(isEpc, epcReg, B(0, 13 bits) ## intPending ## swIrq ## imask)
+  }
+
+  // CTRL write (word ST, or STB to the low byte).
+  when(core.io.dataBus.req.fire && isIntCtrl && core.io.dataBus.req.wr) {
+    imask := core.io.dataBus.req.wrData(0)
+    swIrq := core.io.dataBus.req.wrData(1)
+  }
+  // Interrupt entry (LAST: auto-DI wins over a same-cycle software write,
+  // so a handler can never be entered with the mask left enabled).
+  when(core.io.irqAccepted) {
+    epcReg := core.io.irqLink
+    imask := False
+  }
+
   // ── Data bus request: accept ──
-  // RAM: always ready; UART write: ready when TX FIFO not full; UART read: always ready
-  core.io.dataBus.req.ready := Mux(isIoAddr,
-    Mux(core.io.dataBus.req.wr, uart.io.txReady, True),
+  // RAM / int-registers: always ready; UART write: ready when TX FIFO not
+  // full (int-register writes are register writes, no UART involvement).
+  core.io.dataBus.req.ready := Mux(isIoAddr && core.io.dataBus.req.wr && !isIntReg,
+    uart.io.txReady,
     True)
 
   // ── UART write ──
-  uart.io.txVld := core.io.dataBus.req.fire && isIoAddr && core.io.dataBus.req.wr
+  uart.io.txVld := core.io.dataBus.req.fire && isIoAddr && core.io.dataBus.req.wr &&
+    !isIntReg
   uart.io.txData := core.io.dataBus.req.wrData(7 downto 0)
 
   // ── UART read (pending/response state machine) ──
@@ -91,7 +132,7 @@ class Soc(hexPath: String = "") extends Component {
     uartRspVld := True
     uartReadPending := False
   }
-  when(core.io.dataBus.req.fire && isIoAddr && !core.io.dataBus.req.wr) {
+  when(core.io.dataBus.req.fire && isIoAddr && !core.io.dataBus.req.wr && !isIntReg) {
     uartReadPending := True
   }
 
@@ -110,8 +151,9 @@ class Soc(hexPath: String = "") extends Component {
     mask = ramWrMask)
 
   // ── Data bus response ──
-  core.io.dataBus.rsp.valid := ramRspVld || uartRspVld
-  core.io.dataBus.rsp.payload := Mux(ramRspVld, ramRdData, B(0, 8 bits) ## uartRdData)
+  core.io.dataBus.rsp.valid := ramRspVld || uartRspVld || intRspVld
+  core.io.dataBus.rsp.payload := Mux(ramRspVld, ramRdData,
+    Mux(uartRspVld, B(0, 8 bits) ## uartRdData, intRdData))
 
   // ======================================================================
   // Formal Verification — covers the following test cases:
@@ -141,15 +183,20 @@ class Soc(hexPath: String = "") extends Component {
     val pReqWr     = past(core.io.dataBus.req.wr)
     val pRamRdReq  = past(core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr)
     val pUartCond  = past(uartReadPending && uart.io.rxVld)
+    val pIsIntReg  = past(isIntReg)
     assumeInitial(!pReqFire)
     assumeInitial(!pIsIo)
     assumeInitial(!pReqWr)
     assumeInitial(!pRamRdReq)
     assumeInitial(!pUartCond)
+    assumeInitial(!pIsIntReg)
     assumeInitial(!ramRspVld)
     assumeInitial(!uartReadPending)
     assumeInitial(!uartRspVld)
     assumeInitial(uartRdData === 0)
+    assumeInitial(!intRspVld)
+    assumeInitial(intRdData === 0)
+    assumeInitial(epcReg === 0)
 
     // ── Instruction fetch ──
 
@@ -172,12 +219,13 @@ class Soc(hexPath: String = "") extends Component {
 
     // ── UART I/O ──
 
-    /* TC-SOC-5: UART write strobe */
-    when(core.io.dataBus.req.fire && isIoAddr && core.io.dataBus.req.wr) {
+    /* TC-SOC-5: UART write strobe (int-register writes — 0x2000/0x2002 —
+     * are register writes and never emit a UART byte; see TC-IRQ-S1) */
+    when(core.io.dataBus.req.fire && isIoAddr && core.io.dataBus.req.wr && !isIntReg) {
       assert(uart.io.txVld)
       assert(uart.io.txData === core.io.dataBus.req.wrData(7 downto 0))
     }
-    when(!(core.io.dataBus.req.fire && isIoAddr && core.io.dataBus.req.wr)) {
+    when(!(core.io.dataBus.req.fire && isIoAddr && core.io.dataBus.req.wr && !isIntReg)) {
       assert(!uart.io.txVld)
     }
 
@@ -185,8 +233,11 @@ class Soc(hexPath: String = "") extends Component {
     when(!isIoAddr) {
       assert(core.io.dataBus.req.ready)
     }
-    when(isIoAddr && core.io.dataBus.req.wr) {
+    when(isIoAddr && core.io.dataBus.req.wr && !isIntReg) {
       assert(core.io.dataBus.req.ready === uart.io.txReady)
+    }
+    when(isIoAddr && core.io.dataBus.req.wr && isIntReg) {
+      assert(core.io.dataBus.req.ready)
     }
     when(isIoAddr && !core.io.dataBus.req.wr) {
       assert(core.io.dataBus.req.ready)
@@ -205,9 +256,10 @@ class Soc(hexPath: String = "") extends Component {
 
     // ── UART read state machine ──
 
-    /* TC-SOC-6: UART read request sets pending */
+    /* TC-SOC-6: UART read request sets pending (int-register reads are
+     * answered by the int FSM, never by the UART — TC-IRQ-S1) */
     when(pastValid()) {
-      when(pReqFire && pIsIo && !pReqWr) {
+      when(pReqFire && pIsIo && !pReqWr && !pIsIntReg) {
         assert(uartReadPending)
       }
     }
@@ -234,24 +286,93 @@ class Soc(hexPath: String = "") extends Component {
 
     // ── Data bus response ──
 
-    /* TC-SOC-8: rsp.valid = OR of RAM and UART response valid */
-    assert(core.io.dataBus.rsp.valid === (ramRspVld || uartRspVld))
+    /* TC-SOC-8: rsp.valid = OR of RAM, UART and interrupt-register
+     * response valids */
+    assert(core.io.dataBus.rsp.valid === (ramRspVld || uartRspVld || intRspVld))
 
-    /* TC-SOC-9: rsp.payload mux */
-    when(ramRspVld && !uartRspVld) {
+    /* TC-SOC-9: rsp.payload mux (priority RAM > UART > int) */
+    when(ramRspVld) {
       assert(core.io.dataBus.rsp.payload === ramRdData)
     }
     when(!ramRspVld && uartRspVld) {
       assert(core.io.dataBus.rsp.payload === B(0, 8 bits) ## uartRdData)
     }
     when(!ramRspVld && !uartRspVld) {
+      assert(core.io.dataBus.rsp.payload === intRdData)
+    }
+    when(!ramRspVld && !uartRspVld && !intRspVld) {
       assert(!core.io.dataBus.rsp.valid)
+    }
+
+    // ── Interrupt controller (Phase 4, ISA-3 §10.4) ──
+
+    /* TC-IRQ-S1: int-register accesses never touch the UART: writes do
+     * not emit a byte (txVld), reads do not start the read FSM. */
+    when(core.io.dataBus.req.fire && isIoAddr && core.io.dataBus.req.wr && isIntReg) {
+      assert(!uart.io.txVld)
+    }
+    when(pastValid()) {
+      when(pReqFire && pIsIo && !pReqWr && pIsIntReg) {
+        assert(!uartReadPending)
+      }
+    }
+
+    /* TC-IRQ-S2: EPC latches the core's link value on entry. */
+    when(pastValid()) {
+      when(past(core.io.irqAccepted)) {
+        assert(epcReg === past(core.io.irqLink))
+      }
+    }
+
+    /* TC-IRQ-S3: auto-DI on entry (mask is down the cycle after accept). */
+    when(pastValid()) {
+      when(past(core.io.irqAccepted)) {
+        assert(!imask)
+      }
+    }
+
+    /* TC-IRQ-S4: the core request is exactly pending && mask, and any
+     * acceptance implies the request was up in that cycle. */
+    when(!imask) { assert(!core.io.irq) }
+    when(core.io.irqAccepted) { assert(core.io.irq) }
+
+    /* TC-IRQ-S5: CTRL write semantics (skipped when the same-cycle entry
+     * auto-DI overrides it — entry has priority by block order). */
+    when(pastValid()) {
+      when(past(core.io.dataBus.req.fire && isIntCtrl && core.io.dataBus.req.wr) &&
+        !past(core.io.irqAccepted)) {
+        assert(imask === past(core.io.dataBus.req.wrData(0)))
+        assert(swIrq === past(core.io.dataBus.req.wrData(1)))
+      }
+    }
+
+    /* TC-IRQ-S6: int-register read response — valid exactly one cycle
+     * after the request (same latency as the sync RAM), cleared on
+     * consumption unless a new int read replaces it. */
+    when(pastValid()) {
+      when(past(core.io.dataBus.req.fire && isIntReg && !core.io.dataBus.req.wr)) {
+        assert(intRspVld)
+      }
+      when(past(intRspVld) && past(core.io.dataBus.rsp.fire)) {
+        assert(intRspVld === past(core.io.dataBus.req.fire && isIntReg &&
+          !core.io.dataBus.req.wr))
+      }
+    }
+
+    /* TC-IRQ-S7: interrupt decode — int registers live in the I/O region
+     * at 0x2000/0x2002 (word-aligned; byte accesses map to the same). */
+    when(isIntReg) {
+      assert(isIoAddr)
+      assert(core.io.dataBus.req.addr(15 downto 1) === 0x1000 ||
+        core.io.dataBus.req.addr(15 downto 1) === 0x1001)
     }
 
     cover(!resetn && pastValid())
     cover(core.io.dataBus.req.fire)
     cover(uartReadPending)
     cover(uartRspVld)
+    cover(intRspVld)
+    cover(core.io.irqAccepted)
   }
 }
 

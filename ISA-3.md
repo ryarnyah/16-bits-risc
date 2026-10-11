@@ -42,7 +42,7 @@ one-word constants up to 255, two-word constants up to 65535, subroutine
 calls with register link, and a `HALT` state. All unassigned encodings are
 normatively defined as `NOP`, making the machine deterministic under
 corrupted input. The ISA is implemented twice (multi-cycle `Core` and
-3-stage `PipCore`) and verified by bounded model checking plus 51
+3-stage `PipCore`) and verified by bounded model checking plus 52
 regression programs on both implementations.
 
 ## Table of Contents
@@ -113,7 +113,8 @@ source-level contract of the assembler. Micro-architectural matters
 3. Decode-friendly field layout (opcodes grouped by control signals).
 4. Exact condition inversion, so branch relaxation needs no special cases.
 5. No state beyond registers, memory, and PC — no flags, no privilege
-   levels, no interrupts (a future revision may add a vector model).
+   levels (a platform MAY add an interrupt vector model on top, Section
+   10.4; the base ISA needs no new encodings for it).
 
 ## 3. Specification Notation
 
@@ -206,10 +207,14 @@ The machine has eight 16-bit general-purpose registers `R0`..`R7`.
 
 ### 4.6 Execution Model
 
-Execution is sequential and in-order. There is no out-of-order commit, no
-speculative state visible to software, and no interrupts: `HALT` is exited
-only by reset (Section 6.6). Implementations MAY pipeline internally
-provided the architectural outcome is identical to sequential execution.
+Execution is sequential and in-order. There is no out-of-order commit and
+no speculative state visible to software: `HALT` is exited only by reset
+(Section 6.6). A platform MAY provide asynchronous interrupts; the
+architectural model then gains exactly one rule — an interrupt is taken
+only at an instruction boundary, and the interrupted instruction sequence
+resumes as if it had never been paused (Section 10.4). Implementations
+MAY pipeline internally provided the architectural outcome is identical
+to sequential execution.
 
 ## 5. Instruction Encoding
 
@@ -414,9 +419,10 @@ Section 8.6 relies on. `Rs` may be any register including `R0`.
 ### 6.6 HALT
 
 `HALT` stops instruction fetch and freezes all architectural state
-(registers, memory, `PC`) until reset or an enabled interrupt. This
-platform has no interrupts, so only reset (including the debug bus reset,
-Section 10.2) exits `HALT`.
+(registers, memory, `PC`) until reset (including the debug bus reset,
+Section 10.2). A pending platform interrupt (Section 10.4) does NOT exit
+`HALT`: interrupt entry requires instruction fetch to be running, so
+`HALT` continues to be exited by reset only.
 
 ### 6.7 NOP
 
@@ -476,7 +482,9 @@ PC_taken = PC_next + 2 * sext(offset)
 A conforming assembler MUST encode `offset = (target - addr - 2) / 2`
 where `addr` is the byte address of the branch instruction. The link value
 written by `CALL`/`CALLR` is also `PC_next`, so `JMP Rlink`/`JMPR`
-returns to the instruction after the call.
+returns to the instruction after the call. Apart from these transfers,
+`PC` is assigned only by reset (Section 4.5) and by platform interrupt
+entry, which loads the fixed vector (Section 10.4).
 
 ### 7.2 Offset Ranges
 
@@ -645,12 +653,16 @@ SoC (`Soc`/`PipSoc`); the bus protocol is specified in `INSTRUCTIONS.md`.
 |:--|:--|
 | `0x0000`..`0x1FFB` | data RAM (single-port, synchronous) |
 | `0x1FFC`..`0xFFFF` | I/O region: reads return the UART RX byte (zero-extended); writes emit the low byte on UART TX |
+| `0x2000`, `0x2001` | interrupt CTRL (Section 10.4) — overrides the UART default |
+| `0x2002`, `0x2003` | interrupt EPC read window (Section 10.4) — overrides the UART default |
 
 The conventional addresses are `0x1FFC` (RX/GPIO-in) and `0x1FFE`
-(TX/GPIO-out); any address ≥ `0x1FFC` aliases into this region. The
-program image occupies the instruction ROM from address 0; instruction and
-data spaces are physically separate in the reference SoC despite sharing
-the numeric space.
+(TX/GPIO-out); any address ≥ `0x1FFC` aliases into this region *except*
+the four interrupt-register bytes `0x2000`..`0x2003`, which decode
+exactly (word accesses; a byte access reaches the same registers through
+the low lane). The program image occupies the instruction ROM from
+address 0; instruction and data spaces are physically separate in the
+reference SoC despite sharing the numeric space.
 
 ### 10.2 HALT and Debug
 
@@ -675,6 +687,53 @@ The C compiler (`cc.py`) and runtime use:
 Arguments beyond three are passed on the stack. Functions save `R5`/`R6`
 in their prologue when nested. `__mul16`/`__div16`/`__mod16` runtime
 routines implement multiply/divide/modulo in software.
+
+### 10.4 Interrupts
+
+The reference SoC provides a single interrupt with a fixed vector,
+implemented entirely with existing encodings — entry, return and masking
+are platform mechanisms, so no instruction is added (the deferred
+instruction-space candidates remain in Appendix E):
+
+| Element | Definition |
+|:--|:--|
+| Vector | `0x0008` — hardware sets `PC` to it on entry |
+| Request | level-sensitive; sources are UART RX non-empty and the software bit `SWIRQ` |
+| `IMASK` | `0x2000` bit 0 (R/W): 1 = enabled, 0 = disabled; **cleared by hardware on entry** (auto-`DI`); resets to 0 |
+| `SWIRQ` | `0x2000` bit 1 (R/W): write 1 to set, 0 to clear |
+| CTRL read | `0x2000` also returns bit 2 = raw pending (sources before masking) |
+| `EPC` | address of the next unexecuted instruction at entry; read-only at `0x2002` (writes ignored) |
+| Disable / enable | write `0x2000` bit 0 (0 = `DI`, 1 = `EI`) — no new instructions |
+| Return | `LD Rn, [epc]` ; `JMP Rn` with any scratch register `Rn` |
+
+Semantics (normative for `Soc`/`PipSoc`):
+
+1. Entry happens only at an instruction boundary: when `IMASK` is set and
+   the request is high, the instruction at `EPC` has NOT executed and all
+   older instructions have completed, including their memory effects.
+   Acceptance adds at most one boundary cycle to the entry path; during
+   `HALT` none is possible (Section 6.6).
+2. On entry the hardware latches `EPC`, clears `IMASK` (auto-`DI` — a
+   handler cannot be interrupted again until it explicitly re-enables),
+   and fetches from the vector.
+3. The request is level-sensitive. A handler MUST clear or mask its source
+   before returning, or the interrupt re-enters immediately after re-enable
+   (the `SWIRQ` idiom writes 0 to `0x2000`, clearing `SWIRQ` and masking
+   in one store).
+4. The handler runs as ordinary code: it MAY use any register, but the
+   interrupted code's live registers are the handler's responsibility
+   (preserve them with stack pushes before clobbering).
+5. `EPC` holds one level only; nesting requires software to save `EPC`
+   first (after a `DI`, before re-enabling).
+6. CTRL and EPC reads use the standard registered read response (one
+   cycle, same as a data-RAM read); `EPC` is stable for as long as no new
+   entry occurs.
+
+Informative — vector layout: address 0 must dispatch over the vector.
+`JMP start` occupies 2 words when `start` < 256 (3 words wide), so code
+at address 0 fits in `0x0000`..`0x0006` and the handler begins at
+`0x0008` (`examples/irq_test.asm` shows the pattern). Programs that never
+enable interrupts (the reset state) are unaffected by the vector.
 
 ## 11. Programming Examples (informative)
 
@@ -762,17 +821,21 @@ isBR    = (op == 0xC)       isCALLR = (op == 0xD)       isJMPR = (op == 0xE)
 
 - **Formal** (Bounded Model Checking, `sbt test`): component suites at
   depth 30 (`ALU`, `Decoder`, `Core`, `PipCore`, `RegFile`,
-  `BusInterface`) and SoC suites at depth 10 (`Soc`, `PipSoc`), plus UART
-  and pipeline-sim suites — 35 test cases, all passing. Assertions cover
-  per-instruction semantics, reserved-is-NOP, link values, byte-lane
-  masks, and write-port arbitration (including the dual-write-port
-  concurrent LD+WB case).
-- **Regression** (`run_tests.py`): 51/51 programs on **both**
-  implementations — 41 C programs (compiled by `cc.py`) and 10
+  `BusInterface`), the `Soc` suite at depth 10 and the `PipSoc` suite at
+  depth 30, plus UART and pipeline-sim suites — 35 test cases, all
+  passing. Assertions cover per-instruction semantics, reserved-is-NOP,
+  link values, byte-lane masks, write-port arbitration (including the
+  dual-write-port concurrent LD+WB case), and the interrupt entry path
+  (acceptance only at instruction boundaries, EPC link precision,
+  vector redirect, auto-DI, CTRL write semantics, and isolation of the
+  interrupt registers from the UART).
+- **Regression** (`run_tests.py`): 52/52 programs on **both**
+  implementations — 41 C programs (compiled by `cc.py`) and 11
   ISA-level assembly tests (`slt_test`, `sra_test`, `imm_test`,
   `call_test`, `callr_test`, `bypass_test`, `byte_test`,
-  `ldi8_rsvd_test`, `bge_test`, `pseudo_test`) covering every
-  instruction, pseudo-op, and relaxation form.
+  `ldi8_rsvd_test`, `bge_test`, `pseudo_test`, `irq_test`) covering
+  every instruction, pseudo-op, and relaxation form, plus the platform
+  interrupt vector/EPC/return path.
 - **Coverage audit** (`isa_coverage.py`): every hardware instruction and
   pseudo-op appears in at least one executed test.
 
@@ -786,8 +849,9 @@ isBR    = (op == 0xC)       isCALLR = (op == 0xD)       isJMPR = (op == 0xE)
   I/O region. Physical security is the system's responsibility.
 - **`HALT` is not a security boundary:** it freezes the core until reset;
   the debug bus can step and write registers.
-- **Denial of service:** infinite loops are unpreemptible (no
-  interrupts); watchdog functionality must be external.
+- **Denial of service:** interrupts do not break infinite loops (return
+  resumes the loop) and `IMASK` resets to disabled; watchdog
+  functionality must be external.
 - **Wrap-around:** all arithmetic wraps mod 2^16; pointer overflow is
   silent, as on typical small microcontrollers.
 
@@ -809,6 +873,10 @@ v3.2   Unified branch BR cc,Rs,off7 (Z/NZ/MI/PL); BEQ/BNE/BLT removed.
 v3.3   PC-relative CALLR Rlink,off9 and JMPR off12 on opcodes 0xD/0xE.
        (LDIH single-word constants: closed as impossible; clean ALU
        opcode map: closed as wontfix; byte-offset widening: deferred.)
+v3.4   Platform interrupt model (Section 10.4): fixed vector 0x0008,
+       CTRL/EPC MMIO at 0x2000/0x2002, hardware auto-DI on entry, return
+       via existing LD/JMP. No encoding changes — v3.3 binaries keep
+       executing (IMASK resets to 0, so old programs never take one).
 ```
 
 ---
@@ -969,7 +1037,7 @@ distinct.
 | Group B, malformed cells | 1 463 | a second two-operand immediate family |
 | Group F, `mf=11` | 512 | `LDBS` (sign-extending byte load), halfword ops |
 | Group F, `mf=00`, payload≠0 | 504 | sign-extended 6-bit constant load (`LDIS`) |
-| — | — | interrupts/traps (vector + saved-PC model first), `WFI` |
+| — | — | traps (fault vector + saved-PC model), `WFI` — the platform interrupt model was added without encodings (Section 10.4) |
 
 New instructions MUST land in reserved cells (never re-interpret legal
 patterns), MUST default to `NOP` until implemented, and MUST be added to

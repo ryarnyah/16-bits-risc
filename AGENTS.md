@@ -38,6 +38,11 @@
   106.19 → ~88-90 FAIL@100 (critical-path analysis in PLAN.md, bypass
   word compare = the delta) **recovered to 101.38 MHz PASS** by the
   dual-port netlist
+- **Phase 4 (interrupts) DONE:** v3.4 zero-ISA platform model — fixed
+  vector 0x0008, CTRL/EPC MMIO at 0x2000/0x2002, hardware auto-DI on
+  entry, RETI = existing LD/JMP pair (Key Fix 27); 52/52 both
+  emulators, all formal suites green, bench cycle-neutral, F4PGA
+  **103.70 MHz PASS**
 
 - **Package:** `risc`
 - **Bus:** 8-bit Stream cmd/rsp + ack, per INSTRUCTIONS.md
@@ -379,12 +384,66 @@
       **101.38 MHz PASS** (identical to the dual-port measurement —
       ROM-content noise only).
 
+27. **Phase 4 interrupts — v3.4 platform model, zero-ISA** (`Core.scala`,
+    `PipCore.scala`, `Soc.scala`, `PipSoc.scala`, `ISA-3.md` §10.4,
+    `PLAN.md`, `examples/irq_test.asm`, `run_tests.py`):
+    - Scope: **interrupts only** (DMA declined).  No encoding changes —
+      entry/return/masking are platform mechanisms on existing
+      instructions; v3.3 binaries are unaffected (IMASK resets to 0 and
+      no old program writes `0x2000`).  (The *proposed* v3.4 of Phase 1
+      was wontfixed and never shipped; v3.4 is first used here.)
+    - Model (ISA-3.md §10.4): fixed vector `0x0008` via `io.irqVector`;
+      level request = (UART RX non-empty || SWIRQ) && IMASK, all owned
+      by the SoC I/O decode; MMIO `0x2000` CTRL (b0 IMASK R/W, b1 SWIRQ
+      R/W, b2 raw pending on read) and `0x2002` EPC read window —
+      decoded exactly, every other address ≥ 0x1FFC keeps the UART
+      alias; RETI = `LD Rn,[EPC-window]; JMP Rn`.
+    - Core (multi-cycle): accept only in FETCH (PC already = next
+      unexecuted, all older work retired, no bus outstanding); a
+      coincident debug-bus command defers entry one cycle; HALT/IDLE
+      never accept (§6.6 — HALT exits by reset only).
+    - PipCore: `irqTake = irq && vID && !stallID && !rEX_brTaken &&
+      !halted && !dbgFlush` squashes the ID instruction (EPC =
+      `rID_pc`), empties EX exactly as the normal vID=0 otherwise-branch
+      (no stale occupant → no double EX→WB commit, no re-issued store),
+      and redirects IF to the vector (async ROM ⇒ no stale in-flight
+      response).  An in-flight LD is left behind safely: its FSM,
+      request and writeback are snapshot/ldState-driven
+      (rEX_type-independent), single-outstanding enforced ID-side.
+    - Controller (byte-identical in Soc/PipSoc): registered CTRL/EPC
+      read response (1-cycle, same latency as the sync RAM; PipCore
+      consumes it in ldState WAIT_BUS like the UART-read path); int
+      writes never reach the UART (txVld/txReady/uartReadPending gated
+      by `!isIntReg`); 3-way rsp mux RAM > UART > int; entry block
+      placed last → hardware auto-DI wins over a same-cycle CTRL write.
+    - Formal: Core TC-IRQ-C1..C3 (accept only in FETCH, link = PC,
+      vector redirect; FETCH-flow asserts exempted for the accept
+      cycle); PipCore TC-IRQ-P1..P3 (ID squashed, link = rID_pc, pc =
+      vector) + `!past(irqTake)` on the 8 ID→EX-transfer/PC-progression
+      properties + `cover(irqTake)`; SoC/PipSoc TC-IRQ-S1..S7 (UART
+      isolation, EPC latch, auto-DI, mask gating, CTRL write semantics,
+      int-read response timing, decode) + `cover(irqAccepted)` (frame-0
+      freedom of imask/swIrq kept — no assumeInitial on them);
+      `SimPipCore` ties the new inputs off (elaboration fix).
+    - End-to-end: `examples/irq_test.asm` — handler at `.org 0x0008`,
+      SWIRQ trigger, EPC return precision (main resumes inside its spin
+      loop and completes), hardware auto-DI, software ack, registered
+      EPC read on both response mechanisms.  R1 = 0x5A.
+    - Gates: formal suites Core BMC(30) 1m42s / PipCore BMC(30) 37m24s /
+      Soc BMC(10) / PipSoc BMC(30) 1h20m all PASS; **52/52 both
+      emulators**; `isa_coverage.py` clean (52 tests, no missing
+      hardware/pseudo); bench **cycle-identical** to the Phase-3
+      baseline (interrupt logic is cycle-neutral); F4PGA
+      **103.70 MHz PASS at 100 MHz** post-route (was 101.38 — placement
+      noise, the ready-cone compare costs nothing); full `sbt test`
+      re-run in progress.
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully
 - **Formal Verification**: ✓ All 5 components pass at BMC(30): Core, ALU, Decoder, RegFile, BusInterface
 - **PipCore Formal Verification**: ✓ PipCore passes BMC(30) (incl. v2.1 CALL/HALT/LDI8/LDB/STB/GrpBImm asserts)
-- **SoC Formal**: ✓ Soc + PipSoc pass BMC(10) incl. byte write-mask TC
+- **SoC Formal**: ✓ Soc passes BMC(10), PipSoc passes BMC(30), incl. byte write-mask TC and the Phase-4 interrupt-controller TCs (TC-IRQ-S1..S7)
 - **Full suite**: ✓ `sbt test` — 34/34 tests pass
 - **Verilator Emulator**: ✓ Compiles and runs, responds to bus commands (LOAD_ADDR, LOAD_DATA, STEP, RUN, READ_REG, READ_MEM, READ_PC)
 - **End-to-end counter program**: ✓ counter.asm loads, loops, counts R3 1..9, BLT branch, resets to 0
@@ -399,7 +458,7 @@
 
 - **PipSoc Emulator**: ✓ Compiles and runs (pipsoc-emu), separate emulator using PipSoc Verilog
 - **PipCore Formal Verification**: ✓ PipCore passes BMC(30)
-- **C + asm tests on both cores**: **49/49 pass** (41 C tests + 8 asm tests, on both PipSoc and multi-cycle core); `python3 isa_coverage.py` audits instruction coverage
+- **C + asm tests on both cores**: **52/52 pass** (41 C tests + 11 asm tests, on both PipSoc and multi-cycle core); `python3 isa_coverage.py` audits instruction coverage
   - Pipeline patterns: `ld_use_all` (LD→ADD/SUB/AND/OR), `ld_st_addr` (LDI address for ST),
     `forward_chain` (6-op ALU forwarding), `ldi_burst` (back-to-back LDI),
     `br_chain` (BEQ/BNE/BLT), `ld_ld_ld` (3 LDs), `st_ld_test` (ST→LD aliasing)
@@ -438,6 +497,12 @@ still NOP — see `ISA-2.1.md` §11):
 | CALL / HALT | group B, cf=001 / 010 | `call_test.asm`, `ldi8_rsvd_test.asm` |
 | LDI8 / LDB / STB | group F (LDI), b8 / mf=01/10 | `byte_test.asm`, `ldi8_rsvd_test.asm` |
 | BGE/BLE/BLTU/BGEU/BLEU/B/BGT/MOV/… | assembler pseudo-ops (§7.2) | `bge_test.asm`, `pseudo_test.asm` |
+
+v3.4 addition (no encoding — platform mechanism, `ISA-3.md` §10.4):
+
+| Feature | Home | Test |
+|---------|------|------|
+| Interrupt vector/EPC/auto-DI/SWIRQ | MMIO `0x2000`/`0x2002` + fixed vector `0x0008` | `irq_test.asm` |
 
 ### FPGA Flow (F4PGA for Basys3 / xc7a35tcpg236-1)
 

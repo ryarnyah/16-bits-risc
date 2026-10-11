@@ -64,6 +64,9 @@ ASM_TESTS = [
                                              # BLE/BLTU/BGEU/BLEU + LDI8 +
                                              # far-branch relaxation (both
                                              # directions, equal operands)
+    ('irq_test.asm',       0x5A,   2000),   # Phase 4 interrupt: vector 0x0008,
+                                             # EPC link/return, auto-DI,
+                                             # SWIRQ + CTRL/EPC MMIO reads
 ]
 
 def compile_c(c_file):

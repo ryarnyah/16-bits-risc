@@ -365,3 +365,92 @@ Gates: 51/51 on both emulators (incl. the 4 formerly failing), coverage
 clean, no RTL change. Fmax re-measured end-to-end with the regenerated
 (new-codegen) `fib_uart.hex`: **101.38 MHz PASS at 100 MHz** — identical
 to the dual-port measurement (ROM-content noise only).
+
+## Phase 4 — Interrupts (v3.4 platform model, zero-ISA) [RTL DONE — GATES PENDING]
+
+Scope decision: **interrupts only** (DMA declined).  ISA impact: none —
+this is the v3.4 platform-level addition specified in ISA-3.md §10.4;
+entry/return/masking are platform mechanisms built on existing
+instructions, so old binaries are unaffected (IMASK resets to 0 and no
+old program ever writes 0x2000).  (Note: the *proposed* v3.4 of Phase 1
+was closed as wontfix and never shipped; version v3.4 is first used here.)
+
+### Design (zero-ISA interrupt model)
+
+- Vector `0x0008`, driven into the core as `io.irqVector` (platform
+  constant in both SoCs).
+- Level-sensitive request = (UART RX non-empty || SWIRQ) && IMASK —
+  all three live in the SoC I/O decode, not in the core.
+- MMIO: `0x2000` CTRL (b0 IMASK R/W, b1 SWIRQ R/W, b2 raw pending on
+  read), `0x2002` EPC read window.  Decoded exactly (word addresses
+  0x1000/0x1001 of `addr[15:1]`); every other address >= 0x1FFC keeps
+  the UART alias, so all existing programs/tests are untouched.
+- Core ports (both cores, via the shared `CoreIo`): `irq`/`irqVector`
+  in, `irqAccepted` (1-cycle pulse) / `irqLink` (EPC value) out.  The
+  SoC latches `irqLink` as EPC and clears IMASK on `irqAccepted`
+  (auto-DI; the entry block is placed after the CTRL-write block, so a
+  same-cycle software write cannot override the mask drop).
+- Multi-cycle Core: accept in FETCH only — PC already holds the next
+  unexecuted instruction, all older work has retired, no bus transaction
+  is outstanding; a coincident debug-bus command defers entry one cycle
+  (RESET/STEP/RUN keep their semantics).  HALT/IDLE never accept
+  (§6.6: HALT exits by reset only).
+- PipCore: accept = `irqTake = irq && vID && !stallID && !rEX_brTaken &&
+  !halted && !dbgFlush`.  The ID instruction is the next unexecuted one:
+  it is squashed (EPC = `rID_pc`) and EX is emptied exactly as the normal
+  vID=0 otherwise-branch does — no stale occupant, hence no double
+  EX→WB commit and no re-issued store (`req.valid = ST && !stFired`).
+  IF redirects to the vector; because the instruction ROM is async, the
+  cycle after the redirect already returns the vector word (no stale
+  in-flight fetch response exists — same reasoning as the exBrTaken
+  discard).  An in-flight LD is deliberately left behind: its FSM,
+  request and writeback are snapshot/ldState-driven (rEX_type-
+  independent) and single-outstanding is enforced ID-side
+  (ldBusyStall/snapLdStall block a second request), so the handler
+  cannot collide with it.
+- Interrupt controller (byte-identical in Soc.scala and PipSoc.scala):
+  registered CTRL/EPC read response (1-cycle, the same latency as Soc's
+  sync RAM; PipCore consumes it in ldState WAIT_BUS like the UART-read
+  path); int-register writes never reach the UART (txVld, txReady and
+  the UART read FSM are all gated by `!isIntReg`); the response mux
+  gains a third source with priority RAM > UART > int.
+
+### Verification
+
+- Formal: Core TC-IRQ-C1..C3 (accept only in FETCH; link = PC; redirect
+  to the vector; the FETCH-flow assert is exempted for the accept
+  cycle).  PipCore TC-IRQ-P1..P3 (ID squashed after accept, link =
+  rID_pc, pc = vector) plus `!past(irqTake)` exemptions on the eight
+  ID→EX-transfer/PC-progression properties and `cover(irqTake)`.
+  SoC + PipSoc TC-IRQ-S1..S7 (UART isolation of int accesses, EPC
+  latch, auto-DI, mask gating of the core request, CTRL write semantics,
+  int-read response timing, decode) plus `cover(core.io.irqAccepted)`.
+- End-to-end: `examples/irq_test.asm` on both emulators — vector layout
+  at 0x0008, SWIRQ trigger, EPC return precision (main resumes inside
+  its spin loop and completes), hardware auto-DI, software ack, and the
+  registered EPC read path on both response mechanisms (sync RAM timing
+  on Soc, delayed WAIT_BUS response on PipSoc).
+
+### Gates
+
+- Formal suites (the long ones run individually first): Core BMC(30)
+  PASS (1m42s), PipCore BMC(30) PASS (37m24s), Soc BMC(10) PASS,
+  PipSoc BMC(30) PASS (1h20m) — no counterexamples on any of the new
+  TC-IRQ-* properties or the `!past(irqTake)`-exempted transfer
+  properties; `cover(irqTake)` reachable.  Full `sbt test` re-run
+  pending as the final gate.
+- `run_tests.py`: **52/52 on both emulators** — `irq_test` returns
+  R1 = 0x5A on the multi-cycle Soc and on PipSoc (vector entry, EPC
+  precision through the mid-loop resume, auto-DI, software ack, and the
+  registered EPC read on both response mechanisms).
+- `isa_coverage.py`: 52 tests; hardware missing=none, pseudo missing=none.
+- `bench.py`: **cycle-identical to the Phase-3 baseline** (nop 33,071 /
+  21,042; alu 258,581 / 154,048; mem 66,571 / 40,000; multi / PipSoc) —
+  the interrupt logic is cycle-neutral, as designed (off the execute
+  path; imask resets to 0).
+- Fmax re-measure (`make f4pga-pipsoc`, end-to-end through bitstream):
+  **103.70 MHz PASS at 100 MHz** post-route (mid-route estimate 89.56;
+  previous Phase-3 measurement 101.38 — the new I/O decode compare in
+  the ready cone costs nothing measurable, the delta is placement/ROM
+  noise).  `f4pga/build/PipSoc.bit` regenerated.
+- Full `sbt test`: pending (background re-run of every suite).

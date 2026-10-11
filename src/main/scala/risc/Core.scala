@@ -39,6 +39,19 @@ case class CoreIo() extends Bundle {
     * bit6 ldiStall. Observability for profiling; pruned in FPGA builds
     * if unconnected. */
   val dbgStall: Bits = out Bits (7 bits)
+
+  // === Phase 4 interrupts (zero-ISA model — ISA-3 §10.4) ===
+  /** Level-sensitive interrupt request, already gated by the platform
+    * interrupt mask (Soc/PipSoc own imask).  Sampled only at instruction
+    * boundaries; HALT never accepts (ISA-3 §6.6). */
+  val irq: Bool = in Bool ()
+  /** Interrupt vector — PC on entry (platform constant 0x0008). */
+  val irqVector: Bits = in Bits (16 bits)
+  /** 1-cycle pulse: an interrupt was accepted this cycle.  The SoC latches
+    * [[irqLink]] as EPC and clears its interrupt mask (auto-DI) on this. */
+  val irqAccepted: Bool = out Bool ()
+  /** PC of the next unexecuted instruction at acceptance (EPC link value). */
+  val irqLink: Bits = out Bits (16 bits)
 }
 
 case class Core() extends Component with CoreBusIoComponent {
@@ -187,6 +200,16 @@ case class Core() extends Component with CoreBusIoComponent {
   // Instruction fetch address driven combinatorially from PC
   io.instrAddr := PC
 
+  // === Interrupt entry (Phase 4, zero-ISA — ISA-3 §10.4) ===
+  // Accept only in FETCH: PC already points at the next unexecuted
+  // instruction, all older work has retired, and no bus transaction is
+  // outstanding.  A coincident debug-bus command wins (entry is deferred
+  // one cycle) so RESET/STEP/RUN keep their semantics.  HALT/IDLE never
+  // accept — HALT stays frozen until reset (ISA-3 §6.6).
+  private val irqFetch = io.irq && !busIf.io.cmdStrb
+  io.irqAccepted := irqFetch && (state === CoreState.FETCH)
+  io.irqLink := PC.asBits
+
   // === FSM: done() helper ===
   private def done(): Unit = {
     when(running) { state := CoreState.FETCH } otherwise { state := CoreState.IDLE }
@@ -196,11 +219,20 @@ case class Core() extends Component with CoreBusIoComponent {
   // ISA §3: Multi-cycle execution — FETCH → DECODE → (LDI_FETCH) → WRITEBACK
   switch(state) {
     is(CoreState.FETCH) {
-      io.instrRsp.ready := True
-      when(io.instrRsp.fire) {
-        instr := io.instrRsp.payload
-        PC := PC + 2
-        state := CoreState.DECODE
+      when(irqFetch) {
+        // Interrupt entry (Phase 4): do not fetch - redirect PC to the
+        // vector.  The current PC (next unexecuted instruction) was already
+        // reported as the link value this cycle; the SoC clears its mask on
+        // irqAccepted so irqFetch drops before the next FETCH (no re-entry,
+        // no instruction lost).
+        PC := io.irqVector.asUInt
+      } otherwise {
+        io.instrRsp.ready := True
+        when(io.instrRsp.fire) {
+          instr := io.instrRsp.payload
+          PC := PC + 2
+          state := CoreState.DECODE
+        }
       }
     }
     is(CoreState.DECODE) {
@@ -358,9 +390,28 @@ case class Core() extends Component with CoreBusIoComponent {
       // TC-CORE-1: FETCH always transitions to DECODE (ISA §3)
       // Guarded by resetn (active-low reset) because hardware reset overrides
       // all pipeline registers and would otherwise spuriously fail the check.
+      // Phase 4: a pending interrupt acceptance (irqAccepted) redirects the
+      // fetch instead of stepping PC — exempt that one cycle.
       when(past(state) === CoreState.FETCH) {
-        when(!busChangesState && resetn) { assert(state === CoreState.DECODE) }
-        when(!busChangesPC && resetn)    { assert(PC === past(PC) + 2) }
+        when(!busChangesState && !past(io.irqAccepted) && resetn) {
+          assert(state === CoreState.DECODE)
+        }
+        when(!busChangesPC && !past(io.irqAccepted) && resetn) {
+          assert(PC === past(PC) + 2)
+        }
+      }
+
+      // ── Phase 4 interrupt entry (zero-ISA — ISA-3 §10.4) ──
+      /* TC-IRQ-C1: acceptance happens only at an instruction boundary
+       * (FETCH) — never mid-instruction, never in HALT/IDLE. */
+      when(resetn && io.irqAccepted) { assert(state === CoreState.FETCH) }
+      /* TC-IRQ-C2: the link value reported for EPC is exactly the PC of
+       * that boundary — the address of the next unexecuted instruction. */
+      when(resetn && io.irqAccepted) { assert(io.irqLink === PC.asBits) }
+      /* TC-IRQ-C3: acceptance redirects PC to the vector (registered one
+       * cycle later; reset at the accept cycle overrides and is excluded). */
+      when(resetn && past(resetn) && past(io.irqAccepted)) {
+        assert(PC === past(io.irqVector).asUInt)
       }
       // TC-CORE-2: LDI_FETCH always transitions to WRITEBACK (ISA §3.6)
       when(past(state) === CoreState.LDI_FETCH) {
