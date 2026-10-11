@@ -652,13 +652,14 @@ SoC (`Soc`/`PipSoc`); the bus protocol is specified in `INSTRUCTIONS.md`.
 | Range | Contents |
 |:--|:--|
 | `0x0000`..`0x1FFB` | data RAM (single-port, synchronous) |
-| `0x1FFC`..`0xFFFF` | I/O region: reads return the UART RX byte (zero-extended); writes emit the low byte on UART TX |
-| `0x2000`, `0x2001` | interrupt CTRL (Section 10.4) — overrides the UART default |
-| `0x2002`, `0x2003` | interrupt EPC read window (Section 10.4) — overrides the UART default |
+| `0x1FFC`..`0x1FFF` | I/O region: reads return the UART RX byte (zero-extended); writes emit the low byte on UART TX |
+| `0x2000`, `0x2001` | interrupt CTRL (Section 10.4) |
+| `0x2002`, `0x2003` | interrupt EPC read window (Section 10.4) |
+| `0x2004`..`0xFFFF` | I/O region: UART alias — identical behaviour to `0x1FFC`..`0x1FFF` |
 
 The conventional addresses are `0x1FFC` (RX/GPIO-in) and `0x1FFE`
-(TX/GPIO-out); any address ≥ `0x1FFC` aliases into this region *except*
-the four interrupt-register bytes `0x2000`..`0x2003`, which decode
+(TX/GPIO-out); every address in the two I/O rows reaches the same UART,
+and only the four interrupt-register bytes `0x2000`..`0x2003` decode
 exactly (word accesses; a byte access reaches the same registers through
 the low lane). The program image occupies the instruction ROM from
 address 0; instruction and data spaces are physically separate in the
