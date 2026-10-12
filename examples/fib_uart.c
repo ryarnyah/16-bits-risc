@@ -6,12 +6,12 @@ int fib(int n) {
 }
 
 void putchar(char c) {
-    unsigned short *tx = (unsigned short *)0x1FFE;
+    unsigned short *tx = (unsigned short *)0xFFFE;
     *tx = c;
 }
 
 char getchar(void) {
-    unsigned short *rx = (unsigned short *)0x1FFC;
+    unsigned short *rx = (unsigned short *)0xFFFC;
     return *rx;
 }
 

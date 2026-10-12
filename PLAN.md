@@ -371,9 +371,8 @@ to the dual-port measurement (ROM-content noise only).
 Scope decision: **interrupts only** (DMA declined).  ISA impact: none —
 this is the v3.4 platform-level addition specified in ISA-3.md §10.4;
 entry/return/masking are platform mechanisms built on existing
-instructions, so old binaries are unaffected (IMASK resets to 0 and no
-old program ever writes 0x2000).  (Note: the *proposed* v3.4 of Phase 1
-was closed as wontfix and never shipped; version v3.4 is first used here.)
+instructions.  (Note: the *proposed* v3.4 of Phase 1 was closed as
+wontfix and never shipped; version v3.4 is first used here.)
 
 ### Design (zero-ISA interrupt model)
 
@@ -381,10 +380,11 @@ was closed as wontfix and never shipped; version v3.4 is first used here.)
   constant in both SoCs).
 - Level-sensitive request = (UART RX non-empty || SWIRQ) && IMASK —
   all three live in the SoC I/O decode, not in the core.
-- MMIO: `0x2000` CTRL (b0 IMASK R/W, b1 SWIRQ R/W, b2 raw pending on
-  read), `0x2002` EPC read window.  Decoded exactly (word addresses
-  0x1000/0x1001 of `addr[15:1]`); every other address >= 0x1FFC keeps
-  the UART alias, so all existing programs/tests are untouched.
+- MMIO: `0xFFF8` CTRL (b0 IMASK R/W, b1 SWIRQ R/W, b2 raw pending on
+  read), `0xFFFA` EPC read window.  Decoded exactly (top-of-page bytes;
+  a byte access reaches the same registers via the word decode); every
+  other address in the I/O rows keeps the UART alias, so the map is
+  disjoint (ISA-3 §10.1).
 - Core ports (both cores, via the shared `CoreIo`): `irq`/`irqVector`
   in, `irqAccepted` (1-cycle pulse) / `irqLink` (EPC value) out.  The
   SoC latches `irqLink` as EPC and clears IMASK on `irqAccepted`
@@ -454,3 +454,38 @@ was closed as wontfix and never shipped; version v3.4 is first used here.)
   the ready cone costs nothing measurable, the delta is placement/ROM
   noise).  `f4pga/build/PipSoc.bit` regenerated.
 - Full `sbt test`: pending (background re-run of every suite).
+
+### Phase 4b — memory map: full RAM, I/O + interrupt at the top (user request)
+
+Requested after the disjoint-table fix: enlarge the data RAM and move
+I/O and the interrupt registers to the end of the address space; if the
+enlargement does not fit the Basys3, keep RAM at `0x1FFF` + UART +
+interrupt at the top (the accepted fallback — the async-read data RAM
+is LUTRAM on FPGA, so growth is placement-risky; cf. item 24).
+
+- New map (ISA-3 §10.1, disjoint rows): RAM `0x0000..0x1FFF` (all 8 KB
+  usable — the old 4-byte I/O shadow at the top is gone), unmapped hole
+  `0x2000..0xFEFF` (reads return 0 via the registered responder, writes
+  dropped — deterministic for every address pattern, design goal 2),
+  I/O alias rows `0xFF00..0xFFF7` and `0xFFFC..0xFFFF` (the same
+  single UART; conventional `0xFFFC` RX / `0xFFFE` TX — the old
+  FC/FE mnemonics survive as page FC), interrupt CTRL `0xFFF8` / EPC
+  `0xFFFA` at the top of the I/O page.
+- Decode: `isRam = addr[15:13]==0`, `isIoAddr = addr[15:8]==0xFF`
+  (pure boolean one-level compares — cheaper than the old
+  `>= 0x1FFC` form in the req.ready cone), int regs =
+  `isIoAddr && addr[7:2]==0x3E` with `addr[1]` selecting CTRL/EPC;
+  every path previously gated on `!isIoAddr` is now gated on `isRam`;
+  dead reads share the interrupt responder (payload 0).
+- Toolchain: cc.py initial SP `0x1FFA` → `0x1FFE` (top word of the full
+  RAM — the C prologue stores `R5` at `[R7]` BEFORE the first
+  decrement, so SP itself must be a valid RAM word; the suite caught
+  `0x2000` immediately: first push dropped into the dead hole, `RET`
+  jumped to 0); UART examples retargeted (`fib_uart.c/.asm`,
+  `soc_test.c/.asm`, `echo.asm`); `irq_test` uses `0xFFF8`/`0xFFFA`.
+- Formal: TC-SOC-2 equivalence rewritten (RAM/I/O decodes + region
+  disjointness), TC-IRQ-S7 decode at the new addresses, new
+  TC-IRQ-S8 (dead-space reads → registered 0; writes → no RAM write,
+  no UART byte, interrupt state unchanged) in both SoCs.
+- Gates: 52/52 both emulators; `isa_coverage.py` clean; bench
+  cycle-identical; SoC/PipSoc formal + Fmax + full `sbt test` pending.

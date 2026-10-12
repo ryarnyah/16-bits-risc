@@ -44,24 +44,27 @@ private val core = PipCore()
   io.uartTx <> uart.io.tx
   uart.io.rx <> io.uartRx
 
-  // I/O region = [0x1FFC, 0xFFFF].  Written as pure boolean logic —
-  // addr ≥ 0x1FFC ⟺ addr[15:13] ≠ 0 (⇒ addr ≥ 0x2000) ∨ ∧addr[12:2]
-  // (⇒ addr ∈ [0x1FFC, 0x1FFF], bits 1:0 free).  Exhaustively equivalent
-  // to `addr >= 0x1FFC` over all 65,536 addresses (and asserted in the
-  // SoC formal below), but maps to 2 LUT levels instead of the
-  // LUT+CARRY4 chain the `>=` constant compare inferred — the compare
-  // sat on the rBusAddr → ramRspVld → ldData critical path (90.13 MHz).
-  private val isIoAddr = (core.io.dataBus.req.addr(15 downto 13) =/= 0) ||
-    core.io.dataBus.req.addr(12 downto 2).andR
+  // Phase 4b memory map: RAM [0x0000, 0x1FFF] (all 8 KB usable), I/O at
+  // the top of the address space (UART alias [0xFF00, 0xFFF7] and
+  // [0xFFFC, 0xFFFF]; interrupt registers [0xFFF8, 0xFFFB]), unmapped
+  // hole [0x2000, 0xFEFF]: reads return 0 via the registered responder,
+  // writes are dropped.  Pure boolean one-level compares (the Phase-3
+  // lesson — the old `>= 0x1FFC` CARRY4 compare sat on the rBusAddr →
+  // ramRspVld → ldData critical path at 90.13 MHz); equivalent forms
+  // machine-asserted in the formal below.  Same decode as Soc.
+  private val isRam    = core.io.dataBus.req.addr(15 downto 13) === 0
+  private val isIoAddr = core.io.dataBus.req.addr(15 downto 8) === 0xFF
+  private val isDead   = !isRam && !isIoAddr
   private val dataWordAddr = core.io.dataBus.req.addr(15 downto 1).resize(log2Up(4096))
 
   // ── Interrupt controller (Phase 4, zero-ISA — ISA-3 §10.4) ──
-  // I/O registers carved out of the I/O region: 0x2000 CTRL (bit0 IMASK,
-  // bit1 SWIRQ) and 0x2002 EPC (read-only window onto the core's link
+  // I/O registers at the top of memory: 0xFFF8 CTRL (bit0 IMASK, bit1
+  // SWIRQ) and 0xFFFA EPC (read-only window onto the core's link
   // value).  Sources: UART RX non-empty (level) and the software bit.
   // Byte-identical to Soc — both SoCs share the memory map and protocol.
-  private val isIntCtrl = isIoAddr && (core.io.dataBus.req.addr(15 downto 1) === 0x1000)
-  private val isEpc     = isIoAddr && (core.io.dataBus.req.addr(15 downto 1) === 0x1001)
+  private val isIntTop  = isIoAddr && (core.io.dataBus.req.addr(7 downto 2) === 0x3E)
+  private val isIntCtrl = isIntTop && !core.io.dataBus.req.addr(1)
+  private val isEpc     = isIntTop && core.io.dataBus.req.addr(1)
   private val isIntReg  = isIntCtrl || isEpc
   private val imask = Reg(Bool()) init False
   private val swIrq = Reg(Bool()) init False
@@ -78,9 +81,13 @@ private val core = PipCore()
   when(core.io.dataBus.rsp.fire) {
     intRspVld := False
   }
-  when(core.io.dataBus.req.fire && isIntReg && !core.io.dataBus.req.wr) {
+  // Unmapped-hole reads share the responder and return 0 (reads are
+  // deterministic for every address pattern — design goal 2).
+  when(core.io.dataBus.req.fire && (isIntReg || isDead) &&
+    !core.io.dataBus.req.wr) {
     intRspVld := True
-    intRdData := Mux(isEpc, epcReg, B(0, 13 bits) ## intPending ## swIrq ## imask)
+    intRdData := Mux(isEpc, epcReg,
+      Mux(isDead, B(0, 16 bits), B(0, 13 bits) ## intPending ## swIrq ## imask))
   }
 
   // CTRL write (word ST, or STB to the low byte).
@@ -138,14 +145,14 @@ private val core = PipCore()
   // before the load (WAW inversion) and collide with the regfile write
   // port (dropped ADDI R7 frame updates; see PLAN.md known limitation).
   private val ramRdData = dataRam.readAsync(dataWordAddr)
-  private val ramRspVld = core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr
+  private val ramRspVld = core.io.dataBus.req.fire && isRam && !core.io.dataBus.req.wr
 
   // v2.1 §4.6: byte writes (STB) mask exactly one 8-bit lane — little-endian,
   // lane selected by addr[0].  Word writes (ST) keep the full 2-bit mask.
   private val ramWrMask = core.io.dataBus.req.payload.isByte ?
     Mux(core.io.dataBus.req.addr(0), B"10", B"01") | B"11"
-  dataRam.write(dataWordAddr, core.io.dataBus.req.wrData,
-    core.io.dataBus.req.fire && !isIoAddr && core.io.dataBus.req.wr,
+  private val ramWrEn = core.io.dataBus.req.fire && isRam && core.io.dataBus.req.wr
+  dataRam.write(dataWordAddr, core.io.dataBus.req.wrData, ramWrEn,
     mask = ramWrMask)
 
   core.io.dataBus.rsp.valid := ramRspVld || uartRspVld || intRspVld
@@ -164,7 +171,7 @@ private val core = PipCore()
     val pReqFire   = past(core.io.dataBus.req.fire)
     val pIsIo      = past(isIoAddr)
     val pReqWr     = past(core.io.dataBus.req.wr)
-    val pRamRdReq  = past(core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr)
+    val pRamRdReq  = past(core.io.dataBus.req.fire && isRam && !core.io.dataBus.req.wr)
     val pUartCond  = past(uartReadPending && uart.io.rxVld)
     val pIsIntReg  = past(isIntReg)
     assumeInitial(!pReqFire)
@@ -181,14 +188,19 @@ private val core = PipCore()
     assumeInitial(intRdData === 0)
     assumeInitial(epcReg === 0)
 
-    assert(isIoAddr === (core.io.dataBus.req.addr >= 0x1FFC))
+    /* TC-SOC-2: memory-map decode equivalence — RAM is exactly
+     * addr[15:13]=0, the I/O page is exactly addr[15:8]=0xFF, and the
+     * two regions are disjoint. */
+    assert(isIoAddr === (core.io.dataBus.req.addr(15 downto 8) === 0xFF))
+    assert(isRam === (core.io.dataBus.req.addr(15 downto 13) === 0))
+    assert(!(isIoAddr && isRam))
 
     // Async RAM: ramRspVld is combinational (same cycle as req.fire)
-    when(core.io.dataBus.req.fire && !isIoAddr && !core.io.dataBus.req.wr) {
+    when(core.io.dataBus.req.fire && isRam && !core.io.dataBus.req.wr) {
       assert(ramRspVld)
     }
 
-    /* Int-register writes — 0x2000/0x2002 — are register writes and never
+    /* Int-register writes — 0xFFF8/0xFFFA — are register writes and never
      * emit a UART byte (see TC-IRQ-S1 below). */
     when(core.io.dataBus.req.fire && isIoAddr && core.io.dataBus.req.wr && !isIntReg) {
       assert(uart.io.txVld)
@@ -213,7 +225,7 @@ private val core = PipCore()
 
     /* v2.1 §4.6: byte writes mask exactly one 8-bit lane (little-endian,
      * addr[0] selects); word writes mask both lanes. */
-    when(core.io.dataBus.req.fire && !isIoAddr && core.io.dataBus.req.wr) {
+    when(core.io.dataBus.req.fire && isRam && core.io.dataBus.req.wr) {
       when(core.io.dataBus.req.payload.isByte) {
         assert(ramWrMask === Mux(core.io.dataBus.req.addr(0), B"10", B"01"))
         assert(ramWrMask =/= B"11")
@@ -311,17 +323,39 @@ private val core = PipCore()
         assert(intRspVld)
       }
       when(past(intRspVld) && past(core.io.dataBus.rsp.fire)) {
-        assert(intRspVld === past(core.io.dataBus.req.fire && isIntReg &&
-          !core.io.dataBus.req.wr))
+        assert(intRspVld === past(core.io.dataBus.req.fire &&
+          (isIntReg || isDead) && !core.io.dataBus.req.wr))
       }
     }
 
-    /* TC-IRQ-S7: interrupt decode — int registers live in the I/O region
-     * at 0x2000/0x2002. */
+    /* TC-IRQ-S7: interrupt decode — int registers live at the top of
+     * the I/O page, 0xFFF8 CTRL / 0xFFFA EPC (byte accesses map to the
+     * same registers through the word decode). */
     when(isIntReg) {
       assert(isIoAddr)
-      assert(core.io.dataBus.req.addr(15 downto 1) === 0x1000 ||
-        core.io.dataBus.req.addr(15 downto 1) === 0x1001)
+      assert(core.io.dataBus.req.addr(7 downto 2) === 0x3E)
+    }
+
+    /* TC-IRQ-S8: the unmapped hole 0x2000..0xFEFF is deterministic —
+     * reads are answered by the registered responder with 0, writes
+     * have no effect anywhere (no RAM write, no UART byte, interrupt
+     * state unchanged). */
+    when(pastValid()) {
+      when(past(core.io.dataBus.req.fire && isDead && !core.io.dataBus.req.wr)) {
+        assert(intRspVld)
+        assert(intRdData === 0)
+      }
+    }
+    when(core.io.dataBus.req.fire && isDead && core.io.dataBus.req.wr) {
+      assert(!uart.io.txVld)
+      assert(!ramWrEn)
+    }
+    when(pastValid()) {
+      when(past(core.io.dataBus.req.fire && isDead && core.io.dataBus.req.wr)) {
+        assert(imask === past(imask))
+        assert(swIrq === past(swIrq))
+        assert(epcReg === past(epcReg))
+      }
     }
 
     cover(!resetn && pastValid())

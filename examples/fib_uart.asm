@@ -1,5 +1,5 @@
 ; C runtime startup
-    LDI R7, #0x1FFA
+    LDI R7, #0x1FFE
     LDI R5, #_exit
     LDI R1, #main
     JMP R1
@@ -71,7 +71,7 @@ putchar:
     ADDI R7, R7, #-4
     ST R2, [R6 -2]
 
-    LDI R1, #0x1FFE
+    ADDI R1, R0, #-2
     ST R1, [R6 -1]
     LD R1, [R6 -1]
     ST R1, [R7]
@@ -99,7 +99,7 @@ getchar:
     ADDI R7, R7, #-4
     ST R2, [R6 -2]
 
-    LDI R1, #0x1FFC
+    ADDI R1, R0, #-4
     ST R1, [R6 -1]
     LD R1, [R6 -1]
     LD R1, [R1 + 0]

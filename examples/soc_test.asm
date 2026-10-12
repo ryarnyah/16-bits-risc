@@ -1,5 +1,5 @@
 ; C runtime startup
-    LDI R7, #0x1FFA
+    LDI R7, #0x1FFE
     LDI R1, #__data_init
     LDI R2, #0
 .init1:
@@ -435,7 +435,7 @@ putchar:
     ADDI R7, R7, #-4
     ST R2, [R6 -2]
 
-    LDI R1, #0x1FFE
+    ADDI R1, R0, #-2
     ST R1, [R6 -1]
     LD R1, [R6 -1]
     ST R1, [R7]
@@ -463,7 +463,7 @@ getchar:
     ADDI R7, R7, #-4
     ST R2, [R6 -2]
 
-    LDI R1, #0x1FFC
+    ADDI R1, R0, #-4
     ST R1, [R6 -1]
     LD R1, [R6 -1]
     LD R1, [R1 + 0]
@@ -522,11 +522,8 @@ print_dec:
     ST R2, [R6 -1]
 
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     XOR R1, R0, R0
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .el4
     LDI R1, #0x002D
@@ -536,29 +533,20 @@ print_dec:
     LD R2, [R7]
     CALLR R5, putchar
     XOR R1, R0, R0
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -1]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SUB R1, R2, R1
     ST R1, [R6 -1]
 .el4:
 .ei5:
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #10
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR NZ, R3, .el6
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #10
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
@@ -579,11 +567,8 @@ print_dec:
     ST R1, [R7]
     ADDI R7, R7, #-2
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #10
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
@@ -624,22 +609,16 @@ print_hex:
     ST R1, [R6 -2]
 .w10:
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #4
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .we11
     LD R1, [R6 -3]
     SRAI R1, R1, #12
     ST R1, [R6 -1]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #15
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R1, R2
     BR Z, R3, .el12
     ADDI R1, R0, #15
@@ -647,19 +626,13 @@ print_hex:
 .el12:
 .ei13:
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #10
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .el14
     LDI R1, #0x0030
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -1]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
     ST R1, [R7]
     ADDI R7, R7, #-2
@@ -669,17 +642,11 @@ print_hex:
     JMPR .ei15
 .el14:
     LDI R1, #0x0041
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -1]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #10
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SUB R1, R2, R1
     ST R1, [R7]
     ADDI R7, R7, #-2
@@ -820,19 +787,13 @@ test_alu:
     ADDI R1, R0, #20
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #30
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el16
     XOR R1, R0, R0
@@ -842,19 +803,13 @@ test_alu:
     LDI R1, #0x0064
     ST R1, [R6 -1]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0032
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0096
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el18
     XOR R1, R0, R0
@@ -866,19 +821,13 @@ test_alu:
     ADDI R1, R0, #30
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SUB R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #20
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el20
     XOR R1, R0, R0
@@ -890,19 +839,13 @@ test_alu:
     ADDI R1, R0, #15
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     AND R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #15
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el22
     XOR R1, R0, R0
@@ -914,19 +857,13 @@ test_alu:
     ADDI R1, R0, #15
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     OR R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x00FF
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el24
     XOR R1, R0, R0
@@ -938,19 +875,13 @@ test_alu:
     LDI R1, #0x00FF
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     XOR R1, R0, R0
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el26
     XOR R1, R0, R0
@@ -962,19 +893,13 @@ test_alu:
     XOR R1, R0, R0
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x00FF
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el28
     XOR R1, R0, R0
@@ -986,19 +911,13 @@ test_alu:
     ADDI R1, R0, #3
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLL R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #8
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el30
     XOR R1, R0, R0
@@ -1010,19 +929,13 @@ test_alu:
     ADDI R1, R0, #2
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SRA R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #4
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el32
     XOR R1, R0, R0
@@ -1032,19 +945,13 @@ test_alu:
     LDI R1, #0x00FF
     ST R1, [R6 -1]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0xFF00
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #-1
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el34
     XOR R1, R0, R0
@@ -1083,11 +990,8 @@ test_branches:
     LDI R1, #0x002A
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el36
     LD R1, [R6 -3]
@@ -1106,11 +1010,8 @@ test_branches:
     ADDI R1, R0, #20
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR NZ, R1, .el38
     LD R1, [R6 -3]
@@ -1129,11 +1030,8 @@ test_branches:
     ADDI R1, R0, #10
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR NZ, R3, .el40
     LD R1, [R6 -3]
@@ -1148,11 +1046,8 @@ test_branches:
 .el40:
 .ei41:
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -1]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .el42
     LD R1, [R6 -3]
@@ -1171,11 +1066,8 @@ test_branches:
     ADDI R1, R0, #5
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R1, R2
     BR NZ, R3, .el44
     LD R1, [R6 -3]
@@ -1348,11 +1240,8 @@ test_memory:
     LD R2, [R7]
     ADD R1, R2, R1
     LD R1, [R1 + 0]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0064
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el46
     LD R1, [R6 -10]
@@ -1376,11 +1265,8 @@ test_memory:
     LD R2, [R7]
     ADD R1, R2, R1
     LD R1, [R1 + 0]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0190
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el48
     LD R1, [R6 -10]
@@ -1404,11 +1290,8 @@ test_memory:
     LD R2, [R7]
     ADD R1, R2, R1
     LD R1, [R1 + 0]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0320
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el50
     LD R1, [R6 -10]
@@ -1447,11 +1330,8 @@ test_memory:
     LD R2, [R7]
     ADD R1, R2, R1
     LD R1, [R1 + 0]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x03E7
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el52
     LD R1, [R6 -10]
@@ -1477,11 +1357,8 @@ test_memory:
     LD R2, [R7]
     ADD R1, R2, R1
     LD R1, [R1 + 0]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0258
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el54
     LD R1, [R6 -10]
@@ -1523,11 +1400,8 @@ deep:
     ST R2, [R6 -1]
 
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     XOR R1, R0, R0
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R1, R2
     BR NZ, R3, .el56
     LDI R1, #0x002A
@@ -1535,11 +1409,8 @@ deep:
 .el56:
 .ei57:
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #1
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SUB R1, R2, R1
     ST R1, [R7]
     ADDI R7, R7, #-2
@@ -1574,11 +1445,8 @@ test_stack:
     CALLR R5, deep
     ST R1, [R6 -1]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x002F
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el58
     LD R1, [R6 -2]
@@ -1624,11 +1492,8 @@ test_runlib:
     ADDI R1, R0, #8
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
@@ -1640,11 +1505,8 @@ test_runlib:
     LD R5, [R7]
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0038
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el61
     LD R1, [R6 -4]
@@ -1663,11 +1525,8 @@ test_runlib:
     LDI R1, #0x002D
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
@@ -1679,11 +1538,8 @@ test_runlib:
     LD R5, [R7]
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x159F
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el64
     LD R1, [R6 -4]
@@ -1702,11 +1558,8 @@ test_runlib:
     ADDI R1, R0, #7
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
@@ -1718,11 +1571,8 @@ test_runlib:
     LD R5, [R7]
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #14
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el67
     LD R1, [R6 -4]
@@ -1741,11 +1591,8 @@ test_runlib:
     ADDI R1, R0, #7
     ST R1, [R6 -2]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ST R5, [R7]
     ADDI R7, R7, #-2
     ST R1, [R7]
@@ -1757,11 +1604,8 @@ test_runlib:
     LD R5, [R7]
     ST R1, [R6 -3]
     LD R1, [R6 -3]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #2
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el70
     LD R1, [R6 -4]
@@ -1898,11 +1742,8 @@ test_arrays:
     ST R1, [R6 -7]
 .w72:
     LD R1, [R6 -7]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #6
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .we73
     LD R1, [R6 -8]
@@ -1928,11 +1769,8 @@ test_arrays:
     JMPR .w72
 .we73:
     LD R1, [R6 -8]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x00D2
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el74
     LD R1, [R6 -9]
@@ -1973,11 +1811,8 @@ test_arrays:
     LD R2, [R7]
     ADD R1, R2, R1
     LD R1, [R1 + 0]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #25
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el76
     LD R1, [R6 -9]
@@ -2024,11 +1859,8 @@ test_pointers:
     ST R1, [R6 -2]
     LD R1, [R6 -2]
     LD R1, [R1 + 0]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x004D
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el78
     LD R1, [R6 -3]
@@ -2050,11 +1882,8 @@ test_pointers:
     LD R2, [R7]
     ST R1, [R2 + 0]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0058
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el80
     LD R1, [R6 -3]
@@ -2098,11 +1927,8 @@ test_ldi:
     ADDI R1, R0, #-1
     ST R1, [R6 -1]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #-1
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el82
     LD R1, [R6 -2]
@@ -2119,11 +1945,8 @@ test_ldi:
     LDI R1, #0x7FFF
     ST R1, [R6 -1]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x7FFF
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el84
     LD R1, [R6 -2]
@@ -2140,11 +1963,8 @@ test_ldi:
     ADDI R1, R0, #1
     ST R1, [R6 -1]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     ADDI R1, R0, #1
-    ADDI R7, R7, #2
-    LD R2, [R7]
     XOR R1, R2, R1
     BR Z, R1, .el86
     LD R1, [R6 -2]
@@ -2243,11 +2063,8 @@ test_uart_rx:
     ADDI R1, R0, #1
     ST R1, [R6 -3]
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0020
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .el88
     XOR R1, R0, R0
@@ -2255,11 +2072,8 @@ test_uart_rx:
 .el88:
 .ei89:
     LD R1, [R6 -2]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LDI R1, #0x0020
-    ADDI R7, R7, #2
-    LD R2, [R7]
     SLT R3, R2, R1
     BR Z, R3, .el90
     XOR R1, R0, R0
@@ -2682,11 +2496,8 @@ main:
     LD R2, [R7]
     CALLR R5, print
     LD R1, [R6 -1]
-    ST R1, [R7]
-    ADDI R7, R7, #-2
+    MOV R2, R1
     LD R1, [R6 -2]
-    ADDI R7, R7, #2
-    LD R2, [R7]
     ADD R1, R2, R1
     ST R1, [R7]
     ADDI R7, R7, #-2

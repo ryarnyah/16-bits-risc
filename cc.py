@@ -399,7 +399,7 @@ class CGen:
     def _emit_startup(self):
         gsz = self.next_global
         self.emit('; C runtime startup')
-        self.emit('    LDI R7, #0x1FFA')
+        self.emit('    LDI R7, #0x1FFE')
         if gsz > 0:
             lp = self.L('init')
             self.emit('    LDI R1, #__data_init')

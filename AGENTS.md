@@ -39,7 +39,8 @@
   word compare = the delta) **recovered to 101.38 MHz PASS** by the
   dual-port netlist
 - **Phase 4 (interrupts) DONE:** v3.4 zero-ISA platform model — fixed
-  vector 0x0008, CTRL/EPC MMIO at 0x2000/0x2002, hardware auto-DI on
+  vector 0x0008, CTRL/EPC MMIO at 0xFFF8/0xFFFA (relocated by item 28),
+  hardware auto-DI on
   entry, RETI = existing LD/JMP pair (Key Fix 27); 52/52 both
   emulators, all formal suites green, bench cycle-neutral, F4PGA
   **103.70 MHz PASS**
@@ -438,6 +439,37 @@
       noise, the ready-cone compare costs nothing); full `sbt test`
       re-run in progress.
 
+28. **Phase 4b — memory map: full RAM, I/O + interrupt at the top**
+    (user request; `Soc.scala`, `PipSoc.scala`, `cc.py`, UART examples,
+    `irq_test.asm`, ISA-3.md §10.1/§10.4/§16, PLAN.md):
+    - Map (disjoint rows, ISA-3 §10.1): RAM `0x0000..0x1FFF` complete
+      (the old 4-byte I/O shadow at the top is gone); unmapped hole
+      `0x2000..0xFEFF` (reads return 0 via the registered responder,
+      writes dropped — deterministic for every address pattern); UART
+      alias rows `0xFF00..0xFFF7` and `0xFFFC..0xFFFF` (the same UART;
+      conventional `0xFFFC` RX / `0xFFFE` TX — the FC/FE mnemonics
+      survive as page FC); interrupt CTRL `0xFFF8` / EPC `0xFFFA` at
+      the top of the I/O page.  Enlargement beyond 8 KB declined per
+      the Basys3 budget (the async-read data RAM is LUTRAM — growing
+      it is placement-risky, cf. item 24).
+    - Decode: `isRam = addr[15:13]==0`, `isIoAddr = addr[15:8]==0xFF`,
+      int regs = `isIoAddr && addr[7:2]==0x3E` with `addr[1]` selecting
+      CTRL/EPC; every former `!isIoAddr` path is gated on `isRam`;
+      dead reads share the interrupt responder (payload 0).
+    - cc.py SP `0x1FFA` → `0x1FFE` (top word of the full RAM — the C
+      prologue stores `R5` at `[R7]` BEFORE the first decrement, so SP
+      itself must be a valid RAM word; `0x2000` failed the suite
+      instantly: first push dropped into the dead hole, `RET` jumped
+      to 0).  UART examples retargeted (`fib_uart.c/.asm`,
+      `soc_test.c/.asm`, `echo.asm`), `irq_test` moved to the new
+      CTRL/EPC addresses; all affected `.hex` regenerated.
+    - Formal: TC-SOC-2 rewritten (RAM/I/O decode equivalence +
+      region disjointness), TC-IRQ-S7 at the new addresses, new
+      TC-IRQ-S8 dead-space determinism (both SoCs).
+    - Gates: 52/52 both emulators, coverage clean (52 tests), bench
+      cycle-identical; SoC/PipSoc formal + Fmax + full `sbt test`
+      pending.
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully
@@ -502,7 +534,7 @@ v3.4 addition (no encoding — platform mechanism, `ISA-3.md` §10.4):
 
 | Feature | Home | Test |
 |---------|------|------|
-| Interrupt vector/EPC/auto-DI/SWIRQ | MMIO `0x2000`/`0x2002` + fixed vector `0x0008` | `irq_test.asm` |
+| Interrupt vector/EPC/auto-DI/SWIRQ | MMIO `0xFFF8`/`0xFFFA` + fixed vector `0x0008` | `irq_test.asm` |
 
 ### FPGA Flow (F4PGA for Basys3 / xc7a35tcpg236-1)
 

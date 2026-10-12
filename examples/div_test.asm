@@ -1,5 +1,5 @@
 ; C runtime startup
-    LDI R7, #0x1FFA
+    LDI R7, #0x1FFE
     LDI R5, #_exit
     LDI R1, #main
     JMP R1

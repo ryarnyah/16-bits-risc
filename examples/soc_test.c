@@ -8,13 +8,13 @@
 
 void putchar(char c) {
     int* tx;
-    tx = (int*)0x1FFE;
+    tx = (int*)0xFFFE;
     *tx = c;
 }
 
 char getchar(void) {
     int* rx;
-    rx = (int*)0x1FFC;
+    rx = (int*)0xFFFC;
     return *rx;
 }
 

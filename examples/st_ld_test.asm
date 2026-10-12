@@ -1,5 +1,5 @@
 ; C runtime startup
-    LDI R7, #0x1FFA
+    LDI R7, #0x1FFE
     LDI R1, #__data_init
     LDI R2, #0
 .init1:

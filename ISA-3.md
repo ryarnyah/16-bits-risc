@@ -651,15 +651,16 @@ SoC (`Soc`/`PipSoc`); the bus protocol is specified in `INSTRUCTIONS.md`.
 
 | Range | Contents |
 |:--|:--|
-| `0x0000`..`0x1FFB` | data RAM (single-port, synchronous) |
-| `0x1FFC`..`0x1FFF` | I/O region: reads return the UART RX byte (zero-extended); writes emit the low byte on UART TX |
-| `0x2000`, `0x2001` | interrupt CTRL (Section 10.4) |
-| `0x2002`, `0x2003` | interrupt EPC read window (Section 10.4) |
-| `0x2004`..`0xFFFF` | I/O region: UART alias — identical behaviour to `0x1FFC`..`0x1FFF` |
+| `0x0000`..`0x1FFF` | data RAM (8 KB, single-port; all of it usable by software) |
+| `0x2000`..`0xFEFF` | unmapped: reads return 0, writes are ignored (deterministic for every address pattern) |
+| `0xFF00`..`0xFFF7` | I/O region: reads return the UART RX byte (zero-extended); writes emit the low byte on UART TX |
+| `0xFFF8`, `0xFFF9` | interrupt CTRL (Section 10.4) |
+| `0xFFFA`, `0xFFFB` | interrupt EPC read window (Section 10.4) |
+| `0xFFFC`..`0xFFFF` | I/O region: UART alias — identical behaviour to `0xFF00`..`0xFFF7` (conventional: `0xFFFC` RX/GPIO-in, `0xFFFE` TX/GPIO-out) |
 
-The conventional addresses are `0x1FFC` (RX/GPIO-in) and `0x1FFE`
+The conventional UART addresses are `0xFFFC` (RX/GPIO-in) and `0xFFFE`
 (TX/GPIO-out); every address in the two I/O rows reaches the same UART,
-and only the four interrupt-register bytes `0x2000`..`0x2003` decode
+and only the four interrupt-register bytes `0xFFF8`..`0xFFFB` decode
 exactly (word accesses; a byte access reaches the same registers through
 the low lane). The program image occupies the instruction ROM from
 address 0; instruction and data spaces are physically separate in the
@@ -700,11 +701,11 @@ instruction-space candidates remain in Appendix E):
 |:--|:--|
 | Vector | `0x0008` — hardware sets `PC` to it on entry |
 | Request | level-sensitive; sources are UART RX non-empty and the software bit `SWIRQ` |
-| `IMASK` | `0x2000` bit 0 (R/W): 1 = enabled, 0 = disabled; **cleared by hardware on entry** (auto-`DI`); resets to 0 |
-| `SWIRQ` | `0x2000` bit 1 (R/W): write 1 to set, 0 to clear |
-| CTRL read | `0x2000` also returns bit 2 = raw pending (sources before masking) |
-| `EPC` | address of the next unexecuted instruction at entry; read-only at `0x2002` (writes ignored) |
-| Disable / enable | write `0x2000` bit 0 (0 = `DI`, 1 = `EI`) — no new instructions |
+| `IMASK` | `0xFFF8` bit 0 (R/W): 1 = enabled, 0 = disabled; **cleared by hardware on entry** (auto-`DI`); resets to 0 |
+| `SWIRQ` | `0xFFF8` bit 1 (R/W): write 1 to set, 0 to clear |
+| CTRL read | `0xFFF8` also returns bit 2 = raw pending (sources before masking) |
+| `EPC` | address of the next unexecuted instruction at entry; read-only at `0xFFFA` (writes ignored) |
+| Disable / enable | write `0xFFF8` bit 0 (0 = `DI`, 1 = `EI`) — no new instructions |
 | Return | `LD Rn, [epc]` ; `JMP Rn` with any scratch register `Rn` |
 
 Semantics (normative for `Soc`/`PipSoc`):
@@ -719,16 +720,17 @@ Semantics (normative for `Soc`/`PipSoc`):
    and fetches from the vector.
 3. The request is level-sensitive. A handler MUST clear or mask its source
    before returning, or the interrupt re-enters immediately after re-enable
-   (the `SWIRQ` idiom writes 0 to `0x2000`, clearing `SWIRQ` and masking
+   (the `SWIRQ` idiom writes 0 to `0xFFF8`, clearing `SWIRQ` and masking
    in one store).
 4. The handler runs as ordinary code: it MAY use any register, but the
    interrupted code's live registers are the handler's responsibility
    (preserve them with stack pushes before clobbering).
 5. `EPC` holds one level only; nesting requires software to save `EPC`
    first (after a `DI`, before re-enabling).
-6. CTRL and EPC reads use the standard registered read response (one
-   cycle, same as a data-RAM read); `EPC` is stable for as long as no new
-   entry occurs.
+6. CTRL and EPC reads use a registered read response: the data is valid
+   the cycle after the request (the data RAM may respond earlier or in
+   the same cycle depending on the implementation); `EPC` is stable for
+   as long as no new entry occurs.
 
 Informative — vector layout: address 0 must dispatch over the vector.
 `JMP start` occupies 2 words when `start` < 256 (3 words wide), so code
@@ -779,8 +781,8 @@ worker: ADDI  R6, R6, #-4      ; frame
 ### 11.4 Byte I/O
 
 ```
-        LDI  R1, #0x1FFC       ; RX port
-        LDI  R2, #0x1FFE       ; TX port
+        LDI  R1, #0xFFFC       ; RX port
+        LDI  R2, #0xFFFE       ; TX port
 loop:   LDB  R3, [R1 + 0]      ; read byte, zero-extended
         STB  R3, [R2 + 0]      ; echo byte
         B    loop
@@ -875,9 +877,15 @@ v3.3   PC-relative CALLR Rlink,off9 and JMPR off12 on opcodes 0xD/0xE.
        (LDIH single-word constants: closed as impossible; clean ALU
        opcode map: closed as wontfix; byte-offset widening: deferred.)
 v3.4   Platform interrupt model (Section 10.4): fixed vector 0x0008,
-       CTRL/EPC MMIO at 0x2000/0x2002, hardware auto-DI on entry, return
-       via existing LD/JMP. No encoding changes — v3.3 binaries keep
-       executing (IMASK resets to 0, so old programs never take one).
+       CTRL/EPC MMIO at 0xFFF8/0xFFFA, hardware auto-DI on entry, return
+       via existing LD/JMP. Platform map (Section 10.1) reorganised: RAM
+       0x0000..0x1FFF complete (no I/O shadow), I/O moved to the top of
+       memory (UART alias rows, conventional 0xFFFC RX / 0xFFFE TX),
+       unmapped hole 0x2000..0xFEFF reads 0 and ignores writes. No
+       encoding changes — compute-only v3.3 binaries keep executing
+       (IMASK resets to 0); I/O code must retarget from the old 0x1FFC
+       base, and the C runtime's initial stack pointer is now 0x1FFE
+       (top of the full RAM).
 ```
 
 ---
