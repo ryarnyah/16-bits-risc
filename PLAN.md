@@ -366,7 +366,61 @@ clean, no RTL change. Fmax re-measured end-to-end with the regenerated
 (new-codegen) `fib_uart.hex`: **101.38 MHz PASS at 100 MHz** — identical
 to the dual-port measurement (ROM-content noise only).
 
-## Phase 4 — Interrupts (v3.4 platform model, zero-ISA) [RTL DONE — GATES PENDING]
+### Change: structural 100 MHz assurance — register-re-sourced critical cones
+
+Fmax on the Phase-4b netlist was seed-lottery: the default nextpnr
+seed was deadlock-class (~88–90 FAIL@100) and even the best seed needed
+a sweep to find (101.81, seed 22; typical seeds 83.7–99.1).
+Dissecting every failing timing path showed the same pattern —
+**freshly-decoded instruction fields and the SoC's request-ready
+compute combinationally feeding handshake/CE paths**, stacking 4–6 LUT
+levels of decode + SoC muxes on top of register-to-register logic.
+Three fixes re-source those inputs from registers (CPI cost measured
+and accepted per the Phase-3 exit gate):
+
+1. **EX-side store-to-load bypass** (was ID-side): the store-tracker
+   snapshot is taken unconditionally at the ID→EX transfer, and the
+   bypass decision (`exBypassTake`) is made one cycle later in EX from
+   registers (`rEX_effAddr`, `stTrack*`) — provably the same operands.
+   Completion moves +1 cycle; the stray 1-cycle RAM read response is
+   dropped in DATA_READY (`rsp.ready` low there), no drain FSM.
+2. **Latched stall-flag bank**: a second `Decoder` decodes the same
+   incoming word (`incWord` = LDI-8 header or payload — fixed point of
+   the wide-immediate scheme), and 7 flags (`isLd/isSt/isLdi/usesRs/
+   usesRt/needsRs/needsRt`) are latched with `rID_instr` under the same
+   fire guard.  Every stall-logic decoder read now starts from a
+   register; formal equivalence asserts pin flags == live decode
+   whenever `vID`.
+3. **`snapStStall` register-only**: dropped `&& !io.dataBus.req.fire`
+   from the snapshot-vs-ST serialization stall — that term pulled the
+   SoC ready-compute (`rBusAddr → isIoAddr → UART-tx mux → req.fire`)
+   into `stallID → instrRsp.fire → ID-register enable` (the seed-6
+   98.98 tail).  Blocking ST entry for the whole held-snapshot window
+   is a strictly stronger serialization (superset of the unfired-window
+   property, machine-checked in both same-cycle and temporal form) and
+   leaves `stallID` register-sourced end-to-end.
+
+Bench trade (PipSoc; multi-cycle bit-identical at
+33,071/258,581/66,571): the two +1-cycle mechanisms cost
+21,042 → 22,043 / 154,048 → 156,049 / 40,000 → 40,705 cycles on
+nop/alu/mem (+4.8% / +1.3% / +1.8%).  At the worst passing Fmax
+(106.09) every benchmark is still **faster in wall clock** than on the
+old best-seed 101.81 netlist, and the Fmax floor rose from
+"83.7–99.1 typical with a deadlocking default seed" to **106.09–112.65
+MHz across 8/8 sampled seeds (default seed 106.62)** — 100 MHz
+assured, not seed-lottered.  Also added: `make f4pga-pipsoc
+F4PGA_SEED=<n>` (nextpnr is deterministic per json+seed, so every seed
+result is reproducible).  Note: formal properties are stripped from the
+generated Verilog (zero `assert` statements in `PipSoc.sv`), so the
+swept netlist is exactly the committed tree's hardware.
+
+Gates: 52/52 both emulators after each fix, coverage clean, bench
+numbers above, `make f4pga-pipsoc` default-seed end-to-end PASS
+(106.62 MHz post-route → frames → bitstream), formal asserts rewritten
+(EX-side convert, flag equivalence, snapStStall same-cycle +
+temporal); full `sbt test` pending (running).
+
+## Phase 4 — Interrupts (v3.4 platform model, zero-ISA) [DONE]
 
 Scope decision: **interrupts only** (DMA declined).  ISA impact: none —
 this is the v3.4 platform-level addition specified in ISA-3.md §10.4;

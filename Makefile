@@ -207,6 +207,10 @@ F4PGA_DIR     := f4pga/build
 # and collapse the whole design (hollow netlist → nextpnr 'no BELs remaining
 # for $buf' errors).
 F4PGA_PROG   ?= examples/fib_uart.hex
+# nextpnr placement seed — post-route Fmax varies by several MHz between
+# seeds (nextpnr is deterministic per json+seed, so a winning seed is
+# reproducible).  Override to e.g. `make f4pga-pipsoc F4PGA_SEED=22`.
+F4PGA_SEED   ?= 1
 F4PGA_JSON    := $(F4PGA_DIR)/Soc.json
 F4PGA_FASM    := $(F4PGA_DIR)/Soc.fasm
 F4PGA_BIT     := $(F4PGA_DIR)/Soc.bit
@@ -430,7 +434,7 @@ $(F4PGA_FASM): $(F4PGA_JSON) $(F4PGA_CHIPDB)
 	$(if $(call f4pga_tool,nextpnr-xilinx), \
 		$(call f4pga_tool,nextpnr-xilinx) --chipdb $(F4PGA_CHIPDB) \
 			--json $< --xdc $(F4PGA_XDC) \
-			--freq 100 \
+			--freq 100 --seed $(F4PGA_SEED) \
 			--write $(F4PGA_DIR)/Soc.pnr --fasm $@, \
 		$(error nextpnr-xilinx not found. Run 'make vendor-f4pga' first))
 	@echo "[F4PGA] PnR done."
@@ -487,7 +491,7 @@ $(F4PGA_DIR)/PipSoc.fasm: $(F4PGA_DIR)/PipSoc.json $(F4PGA_CHIPDB) $(F4PGA_PIPSO
 	$(if $(call f4pga_tool,nextpnr-xilinx), \
 		$(call f4pga_tool,nextpnr-xilinx) --chipdb $(F4PGA_CHIPDB) \
 			--json $< --xdc $(F4PGA_PIPSOC_XDC) \
-			--freq 100 \
+			--freq 100 --seed $(F4PGA_SEED) \
 			--write $(F4PGA_DIR)/PipSoc.pnr --fasm $@, \
 		$(error nextpnr-xilinx not found. Run 'make vendor-f4pga' first))
 	@echo "[F4PGA] PnR done."

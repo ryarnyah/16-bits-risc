@@ -385,20 +385,77 @@ case class PipCore() extends Component with CoreBusIoComponent {
   }
 
   // =========================================================================
+  // Store-to-load bypass decision (Phase 3 IPC) — EX side, timing round
+  // =========================================================================
+  // The [15:1] address compare used to sit in the ID→EX transfer, putting
+  // regfile read → forwarding mux → idEffAddr adder → compare → nextLdRd
+  // on the rID_rsAddr critical cone (11.0 ns worst seed; seeds 2/5).  The
+  // LD's snapshot is now always taken at transfer (snapshot entry no longer
+  // tests bypassTake), and one cycle later — while the LD still occupies
+  // EX — the compare runs from REGISTERS and converts the held snapshot
+  // into a bypass completion, before/while the bus request fires.
+  //
+  // Decision equivalence with the old ID-time compare: operands are
+  // identical.  rEX_effAddr holds the transfer's idEffAddr, and the
+  // tracker can only change on an EX store's fire — no store can be in EX
+  // while the LD is there, and stStall guaranteed the older store had
+  // fired before the LD transferred — so hit/miss is unchanged.  The
+  // completion simply lands one cycle later (+1 cycle per bypass hit);
+  // the bus-path request timing is untouched (snapshot entry is still at
+  // the transfer edge).
+  //
+  // Stray request: the unconditional snapshot raises req.valid during the
+  // convert cycle and a RAM request always fires there.  That read is
+  // harmless — its 1-cycle response pulse (Soc ramRspVld) arrives while
+  // ldState is DATA_READY, where rsp.ready is low, and is dropped; no
+  // other request can be in flight meanwhile (snapLdStall/snapStStall
+  // hold ID for the whole snapshot window).
+  private val exBypassTake = (rEX_type === InstrType.LD) && !rEX_byte &&
+    snapPending && stTrackVld &&
+    (rEX_effAddr(15 downto 1) === stTrackAddr(15 downto 1))
+  when(exBypassTake) {
+    nextLdRd := snapRd
+    nextLdWbVld := True
+    nextLdData := stTrackData
+    nextLdIsByte := False
+    nextLdAddr0 := False
+    nextLdState := LdPhase.DATA_READY
+  }
+
+  // =========================================================================
+  // ID stall flags — decode latched with the instruction (timing round)
+  // =========================================================================
+  // The IF→ID handshake cone (live decode of rID_instr → stall conditions
+  // → instrRsp.ready → fire → CE of the ID registers) reached 10.7 ns
+  // (seeds 4/5); roughly half of it was the decoder.  The seven coarse
+  // classes the stall logic consumes are instead computed from the
+  // INCOMING word by a second Decoder instance and latched by the same
+  // fire guard that writes rID_instr — stallID now reads registers,
+  // item-22 style (mirrors how rEX_* stopped re-decoding rEX_instr).
+  // The live decoder keeps serving everything else (fields, idType,
+  // ID→EX transfer) — those are D-side paths, not on the fire cone.
+  // Equivalence with the live decoder is machine-checked in the formal
+  // block below (asserted whenever vID).
+  private val rID_isLd    = Reg(Bool()) init False  // isLD || isLDB
+  private val rID_isSt    = Reg(Bool()) init False  // isST || isSTB
+  private val rID_isLdi   = Reg(Bool()) init False  // 2-word LDI header
+  private val rID_usesRs  = Reg(Bool()) init False  // mem op || isBranch || isJMP
+  private val rID_usesRt  = Reg(Bool()) init False  // isCALL (CALL reads rt)
+  private val rID_needsRs = Reg(Bool()) init False  // reads rs (idNeedsRs)
+  private val rID_needsRt = Reg(Bool()) init False  // reads rt (idNeedsRt)
+
+  // =========================================================================
   // Stall and Flush Logic
   // =========================================================================
 
   // Load-use hazard: EX has LD that writes a register needed by ID
   // (LDB is an LD-type access and participates; LDI8 reads no registers;
   // v3.3 CALLR/JMPR read no registers — their Rs/Rt fields are immediates.)
-  private val idNeedsRs = vID && !decoder.io.isLDI && !decoder.io.isLDI8 &&
-    !decoder.io.isCALLR && !decoder.io.isJMPR
+  private val idNeedsRs = vID && rID_needsRs
   // rt port readers: register ALU ops (not the in-place group-B immediates,
   // whose [5:3] field is the immediate), stores (incl. STB) and CALL
   // (Rtarget in instr[5:3]).  v3.2: branches read no Rt.
-  private val idNeedsRt = vID && (decoder.io.isALU || decoder.io.isST ||
-    decoder.io.isSTB || decoder.io.isCALL) &&
-    !decoder.io.isImmEn && !decoder.io.isGrpBImm
+  private val idNeedsRt = vID && rID_needsRt
   // Load-use hazard (Phase 3: snapshot-aware, EX-independent). A pending
   // snapshot's data is never available yet; a WAIT_BUS load's data is
   // available at DATA_READY via ldData forwarding (hence !ldRspPending
@@ -415,20 +472,27 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // outstanding on the bus (single-outstanding invariant — the bus has no
   // transaction IDs, so two in-flight reads would be indistinguishable).
   // Non-LD instructions flow freely; true dependents use loadUseHazard.
-  private val ldBusyStall = ldPending && !ldRspPending && vID &&
-    (decoder.io.isLD || decoder.io.isLDB)
+  private val ldBusyStall = ldPending && !ldRspPending && vID && rID_isLd
   // Serialize LD/ST transfers against a held snapshot. A same-edge LD
   // transfer would hijack nextLdState (transfer is later in file = higher
   // priority), skipping the firing load's DATA_READY/WAIT_BUS state — its
   // writeback enable and response would be lost (byte_test: second LDB
   // kills the first). Hence LD entry is blocked for the whole held
-  // window (firing or not); the ST half needs only the unfired case (an
-  // ST transfer never touches snapshot/state, but would mix its strobe
-  // with the snapshot's address on the bus).
-  private val snapLdStall = snapPending && vID &&
-    (decoder.io.isLD || decoder.io.isLDB)
-  private val snapStStall = snapPending && !io.dataBus.req.fire && vID &&
-    (decoder.io.isST || decoder.io.isSTB)
+  // window (firing or not).
+  //
+  // The ST half is now blocked for the whole held window too (an ST
+  // transfer never touches snapshot/state but would mix its strobe with
+  // the snapshot's address on the bus).  The old formulation
+  // `snapPending && !io.dataBus.req.fire` was strictly weaker yet put the
+  // SoC's request-ready compute (rBusAddr → isIoAddr → UART-tx mux →
+  // dataBus.req.fire) on the stallID → instrRsp.fire → ID-register
+  // enable critical cone — the tail that still failed seed 6 at 98.98
+  // MHz after both cone fixes.  "Blocked while held" is a superset of
+  // "blocked while unfired" (the original property, still machine-checked
+  // below), keeps stallID register-only, and costs at most +1 cycle for
+  // an ST directly behind an issuing LD.
+  private val snapLdStall = snapPending && vID && rID_isLd
+  private val snapStStall = snapPending && vID && rID_isSt
   // v2.1: hold the instruction in EX until its store request is accepted
   // (UART TX backpressure) and the acceptance is REGISTERED (stFired).
   // Without the hold, a ST/STB whose req.ready is low would be overwritten
@@ -443,7 +507,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // This reduces branch penalty from 2 cycles to 1 for taken branches,
   // and eliminates the penalty entirely for not-taken branches.
   //private val stallBrId = vID && (decoder.io.isBranch || decoder.io.isJMP)
-  private val stallLdiId = vID && decoder.io.isLDI
+  private val stallLdiId = vID && rID_isLdi
 
   // =========================================================================
   // EX→ID result hazard (timing-critical reads only)
@@ -464,11 +528,8 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // ID→EX, which retains the EX instruction, whose EX→WB transfer re-fires
   // every cycle (non-LD/ST, no flush) — so rWbHasExRes goes high exactly
   // one cycle later and clears the hazard.
-  private val idIsMemOp = decoder.io.isLD || decoder.io.isLDB ||
-    decoder.io.isST || decoder.io.isSTB
-  private val idUsesRsInId = vID && (idIsMemOp || decoder.io.isBranch ||
-    decoder.io.isJMP)
-  private val idUsesRtInId = vID && decoder.io.isCALL
+  private val idUsesRsInId = vID && rID_usesRs
+  private val idUsesRtInId = vID && rID_usesRt
   private val exIdFwdHazard = ((rEX_type === InstrType.ALU ||
     rEX_type === InstrType.CALL) && rEX_hasRd && rEX_rd =/= 0) &&
     ((idUsesRsInId && rEX_rd === rID_rsAddr) ||
@@ -591,6 +652,13 @@ case class PipCore() extends Component with CoreBusIoComponent {
     (io.instrRsp.payload(7 downto 6) === B"00") &&
     (io.instrRsp.payload(5 downto 0) === B"000000")
 
+  // Stall-flag decode of the incoming word (latched with rID below): the
+  // ldiPending mux mirrors the rID_instr write — second word of a 2-word
+  // LDI carries the header that becomes the instruction.
+  private val incWord = Mux(ldiPending, ldiHeader, io.instrRsp.payload)
+  private val incDec = Decoder()
+  incDec.io.instr := incWord
+
   when(io.instrRsp.fire) {
     // Guard against stale bus responses arriving after a branch redirects
     // PC.  When exBrTaken is True the response is for the sequential address
@@ -621,6 +689,23 @@ case class PipCore() extends Component with CoreBusIoComponent {
           nextVID := True
           nextPC := pc + 2
         }
+        // Stall flags ride along with rID (same guard as the rID writes;
+        // incWord selects the header for the ldiPending case).  Stale
+        // flags when the header is captured are harmless — the header
+        // case sets vID only after the second word arrives, together
+        // with its latch.
+        rID_isLd    := incDec.io.isLD || incDec.io.isLDB
+        rID_isSt    := incDec.io.isST || incDec.io.isSTB
+        rID_isLdi   := incDec.io.isLDI
+        rID_usesRs  := incDec.io.isLD || incDec.io.isLDB ||
+          incDec.io.isST || incDec.io.isSTB || incDec.io.isBranch ||
+          incDec.io.isJMP
+        rID_usesRt  := incDec.io.isCALL
+        rID_needsRs := !incDec.io.isLDI && !incDec.io.isLDI8 &&
+          !incDec.io.isCALLR && !incDec.io.isJMPR
+        rID_needsRt := (incDec.io.isALU || incDec.io.isST ||
+          incDec.io.isSTB || incDec.io.isCALL) && !incDec.io.isImmEn &&
+          !incDec.io.isGrpBImm
       }
     } otherwise {
       // Stale response after branch: discard, clear stale LDI state.
@@ -816,19 +901,10 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // and kill the branch/JMP transfer.  By nesting, we enter the outer when
   // unconditionally (for the no-stall/no-flush case) and only gate the
   // actual transfer on vID.
-  // Store-to-load bypass decision (Phase 3 IPC): word LD to the tracked
-  // word index. Decided atomically at transfer; completion data is latched
-  // below so later stores cannot disturb it. An unfired ST in EX excludes
-  // bypass via stStall (no transfer while ST unfired).
-  // Both isIoAddr terms are dropped (F4PGA timing): the tracker invariant
-  // `stTrackVld ⇒ !isIoAddr(stTrackAddr)` is formally asserted below, and
-  // [15:1] equality pins idEffAddr within ±1 of that address — so
-  // idEffAddr ≥ 0x1FFC would require the tracker to hold 0x1FFC/0x1FFD,
-  // which the invariant forbids (0x1FFC has word index 0xFFE ≠ 0xFFD).
-  // The removed `16'h1ffc <= idEffAddr` carry-chain compare was on the
-  // rID_rsAddr → idEffAddr → CE critical path (86.63 MHz).
-  private val bypassTake = decoder.io.isLD && stTrackVld &&
-    (idEffAddr(15 downto 1) === stTrackAddr(15 downto 1))
+  // Store-to-load bypass decision: moved to EX (exBypassTake, declared
+  // with the LD FSM above) — the ID-time [15:1] compare sat on the
+  // rID_rsAddr → idEffAddr → nextLdRd critical cone (11.0 ns).  ID now
+  // always takes the snapshot; EX converts it one cycle later.
   when(!stallID && !exBrTaken && !halted && !irqTake) {
     when(vID) {
       // Clear vID when IF→ID is not also firing (otherwise the new
@@ -869,23 +945,19 @@ case class PipCore() extends Component with CoreBusIoComponent {
         rBusAddr := idEffAddr
         rBusByte := idIsByteMem
       }
-      when((decoder.io.isLD || decoder.io.isLDB) && !bypassTake) {
+      // Snapshot entry is UNCONDITIONAL for LD/LDB: taking it always keeps
+      // idEffAddr (and the bypass compare that used to gate this) off the
+      // nextLdRd/snapRd next-state cone; exBypassTake converts the held
+      // snapshot into the bypass completion one cycle later.  rBusByte/
+      // snapAddr0 are still latched from idEffAddr here (direct bits, no
+      // compare).
+      when(decoder.io.isLD || decoder.io.isLDB) {
         snapRd := (decoder.io.hasRd ? decoder.io.rdField | B"000").asUInt
         snapAddr0 := idEffAddr(0)
         nextLdState := LdPhase.SNAPSHOT
       }
-      // Bypass completion (no bus): latch dest/valid/data now, DATA_READY
-      // next; the normal writeback path fires from ldWbFiring.
-      when(bypassTake) {
-        nextLdRd := (decoder.io.hasRd ? decoder.io.rdField | B"000").asUInt
-        nextLdWbVld := True
-        nextLdData := stTrackData
-        // Word completion: record non-byte lane info (else a stale LDB
-        // record would fail the zero-extension assert below).
-        nextLdIsByte := False
-        nextLdAddr0 := False
-        nextLdState := LdPhase.DATA_READY
-      }
+      // Bypass completion (no bus): handled EX-side by exBypassTake —
+      // snapshot entry above, conversion from registers one cycle later.
 
       rEX_aluFunc := decoder.io.aluFunc
       nextREXtype := idType
@@ -1448,31 +1520,57 @@ case class PipCore() extends Component with CoreBusIoComponent {
     }
 
     // ======================================================================
+    // Stall-flag latch equivalence (timing round: decode latched with rID)
+    // ======================================================================
+    // Whenever ID holds an instruction, the latched classes must equal the
+    // live decode of rID_instr: both were produced from the same word at
+    // its fire edge (vID and the flags latch under one guard) and hold
+    // until the next fire.  Machine-checks that the stall logic and the
+    // live decoder cannot drift apart.
+    when(vID) {
+      assert(rID_isLd === (decoder.io.isLD || decoder.io.isLDB))
+      assert(rID_isSt === (decoder.io.isST || decoder.io.isSTB))
+      assert(rID_isLdi === decoder.io.isLDI)
+      assert(rID_usesRs === (decoder.io.isLD || decoder.io.isLDB ||
+        decoder.io.isST || decoder.io.isSTB || decoder.io.isBranch ||
+        decoder.io.isJMP))
+      assert(rID_usesRt === decoder.io.isCALL)
+      assert(rID_needsRs === (!decoder.io.isLDI && !decoder.io.isLDI8 &&
+        !decoder.io.isCALLR && !decoder.io.isJMPR))
+      assert(rID_needsRt === ((decoder.io.isALU || decoder.io.isST ||
+        decoder.io.isSTB || decoder.io.isCALL) && !decoder.io.isImmEn &&
+        !decoder.io.isGrpBImm))
+    }
+
+    // ======================================================================
     // Temporal: LD snapshot capture + fire + single-outstanding (Phase 3)
     // ======================================================================
     when(pastValid() && resetn) {
-      // ID→EX of an LD either snapshots (bus path) or bypass-completes.
+      // ID→EX of an LD/LDB always captures the snapshot now — the bypass
+      // decision moved to EX (exBypassTake), so no ID-time condition can
+      // skip snapshot entry anymore.
       when(past(vID) && (past(decoder.io.isLD) || past(decoder.io.isLDB)) &&
         !past(stallID) && !past(exBrTaken) && !past(halted) && !past(irqTake)) {
-        when(past(bypassTake)) {
-          // Bypass: DATA_READY + valid writeback + latched data/rd now.
-          assert(ldState === LdPhase.DATA_READY)
-          assert(ldWbVld)
-          assert(ldRd === past(decoder.io.rdField).asUInt)
-          assert(ldData === past(stTrackData))
-          // No bus request fires with a bypassing transfer (either valid
-          // term would imply a stall: LD-term via snapLdStall, ST-term via
-          // stStall) — so the tracker read is committed, not mid-update.
-          assert(!io.dataBus.req.fire)
-        } otherwise {
-          assert(snapPending)
-          assert(snapRd === past(decoder.io.rdField).asUInt)
-          // rBusAddr/rBusByte latched the low 16 bits (modular address,
-          // same truncation as the rEX_effAddr := idEffAddr assignment).
-          assert(rBusAddr === past(idEffAddr)(15 downto 0))
-          assert(rBusByte === past(idIsByteMem))
-          assert(snapAddr0 === past(idEffAddr(0)))
-        }
+        assert(snapPending)
+        assert(snapRd === past(decoder.io.rdField).asUInt)
+        // rBusAddr/rBusByte latched the low 16 bits (modular address,
+        // same truncation as the rEX_effAddr := idEffAddr assignment).
+        assert(rBusAddr === past(idEffAddr)(15 downto 0))
+        assert(rBusByte === past(idIsByteMem))
+        assert(snapAddr0 === past(idEffAddr(0)))
+      }
+      // Bypass conversion happens one cycle after the transfer, from EX
+      // registers: the held snapshot became a bus-path DATA_READY with the
+      // tracker's data/dest.  (Any request fired in the convert cycle is a
+      // stray read — its response pulse is dropped in DATA_READY.)
+      when(past(exBypassTake)) {
+        assert(ldState === LdPhase.DATA_READY)
+        assert(ldWbVld)
+        assert(ldRd === past(snapRd))
+        assert(ldData === past(stTrackData))
+        assert(!ldIsByte)
+        assert(!ldAddr0)
+        assert(snapPending === False)
       }
       // rBusAddr/rBusByte capture EVERY mem-op ID→EX transfer (LD/LDB and
       // ST/STB) — the bus issues from these registers.
@@ -1487,13 +1585,17 @@ case class PipCore() extends Component with CoreBusIoComponent {
       when(past(snapPending) && past(io.dataBus.req.fire)) {
         assert(ldRd === past(snapRd))
         assert(ldIsByte === past(rBusByte))
-        assert(ldAddr0 === past(snapAddr0))
+        // ldAddr0: the bypass conversion overrides snapAddr0 with False
+        // (word completion records no lane) — guard that one coincidence.
+        when(!past(exBypassTake)) {
+          assert(ldAddr0 === past(snapAddr0))
+        }
         assert(ldWbVld)
       }
       // DATA_READY always carries a valid writeback (set at fire, cleared
       // at firing) — the invariant the DATA_READY-overwrite relies on.
       // Combinational form: all three DATA_READY entries set ldWbVld on
-      // the same edge (bus fire ×2, bypass transfer ×1).
+      // the same edge (bus fire ×2, EX bypass conversion ×1).
       when(ldRspPending) {
         assert(ldWbVld)
       }
@@ -1504,14 +1606,26 @@ case class PipCore() extends Component with CoreBusIoComponent {
       }
       // No LD entry while a snapshot is held (firing or not) — a
       // same-edge transfer would hijack nextLdState and lose the
-      // completing load. No ST entry over an unfired snapshot without
-      // same-cycle fire (mixed-request serialization).
+      // completing load.  The temporal ST form keeps the original
+      // unfired-window condition: a held+unfired snapshot at T is still
+      // held at T+1 (it can only leave on a fire), and the stricter
+      // snapStStall keeps stalling it — so the property is monotone
+      // (stallID_new ≥ stallID_old pointwise) and this exact historical
+      // formulation must be kept: weakening it to "held at T ⇒ stalled
+      // at T+1" would be unsound — a snapshot that FIRES at T is gone at
+      // T+1 and no stall term is guaranteed there.  The same-cycle form
+      // below pins the design intent directly (trivially implied by
+      // snapStStall being a term of stallID; see snapStStall).
       when(past(snapPending) && past(vID) &&
         (past(decoder.io.isLD) || past(decoder.io.isLDB))) {
         assert(stallID)
       }
       when(past(snapPending) && !past(io.dataBus.req.fire) && past(vID) &&
         (past(decoder.io.isST) || past(decoder.io.isSTB))) {
+        assert(stallID)
+      }
+      when(snapPending && vID &&
+        (decoder.io.isST || decoder.io.isSTB)) {
         assert(stallID)
       }
       // LD transfer during DATA_READY is safe only because the completing
@@ -1546,12 +1660,12 @@ case class PipCore() extends Component with CoreBusIoComponent {
     when(stTrackVld) {
       assert(!isIoAddr(stTrackAddr.asUInt))
     }
-    // Redundancy of the dropped isIoAddr terms in bypassTake (timing
-    // optimisation): a bypassing LD can never target I/O — follows from
-    // the tracker invariant above + [15:1] address equality.  Asserted so
-    // the simplification is machine-checked, not just argued.
-    when(bypassTake) {
-      assert(!isIoAddr(idEffAddr(15 downto 0).asUInt))
+    // Redundancy of the dropped isIoAddr terms in the bypass compare
+    // (timing optimisation): a bypassing LD can never target I/O — follows
+    // from the tracker invariant above + [15:1] address equality.  Asserted
+    // so the simplification is machine-checked, not just argued.
+    when(exBypassTake) {
+      assert(!isIoAddr(rEX_effAddr.asUInt))
     }
 
     // ======================================================================
@@ -1572,7 +1686,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     cover(snapStStall)
     cover(snapPending)
     cover(snapPending && io.dataBus.req.fire)
-    cover(bypassTake)
+    cover(exBypassTake)
     cover(stTrackVld)
     cover(rEX_aluFunc === B"0000")
     cover(rEX_aluFunc === B"0001")

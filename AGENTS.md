@@ -37,7 +37,11 @@
   −19.2/−11.5/−3.6% PipSoc); Fmax
   106.19 → ~88-90 FAIL@100 (critical-path analysis in PLAN.md, bypass
   word compare = the delta) **recovered to 101.38 MHz PASS** by the
-  dual-port netlist
+  dual-port netlist; structural **100 MHz assurance round DONE**
+  (Key Fix 29): three cones re-sourced from registers → **8/8 seeds
+  PASS, 106.09–112.65 MHz** (default seed 106.62), bitstream
+  end-to-end on the default seed (was seed-lottery 83.7–99.1 with a
+  deadlocking default seed)
 - **Phase 4 (interrupts) DONE:** v3.4 zero-ISA platform model — fixed
   vector 0x0008, CTRL/EPC MMIO at 0xFFF8/0xFFFA (relocated by item 28),
   hardware auto-DI on
@@ -467,8 +471,55 @@
       region disjointness), TC-IRQ-S7 at the new addresses, new
       TC-IRQ-S8 dead-space determinism (both SoCs).
     - Gates: 52/52 both emulators, coverage clean (52 tests), bench
-      cycle-identical; SoC/PipSoc formal + Fmax + full `sbt test`
-      pending.
+      cycle-identical; SoC/PipSoc formal suites PASS and full
+      `sbt test` re-run PASS (see Key Fix 29); F4PGA **101.81 MHz
+      PASS** at seed 22 — the then-default seed was deadlock-class
+      (~88-90), fixed structurally by Key Fix 29.
+
+29. **Structural 100 MHz assurance — register-re-sourced critical cones**
+    (`PipCore.scala`, `Makefile`; the "Modify code to assure 100 Mhz!!!"
+    work order): the Phase-4b netlist passed Fmax only by seed lottery
+    (typical seeds 83.7–99.1 FAIL, best 101.81 via seed sweep, default
+    seed deadlock-class).  Every failing timing path dissected to the
+    same pattern — freshly-decoded instruction fields or the SoC's
+    request-ready compute combinationally feeding handshake/CE paths.
+    Three cones re-sourced from registers (full write-up in PLAN.md
+    Phase 3, "structural 100 MHz assurance"):
+    - **EX-side store-to-load bypass** (cone A): unconditional snapshot
+      at ID→EX; `exBypassTake` converts the held snapshot to
+      DATA_READY one cycle later from registers (`rEX_effAddr`,
+      `stTrack*`) — provably the same operands; completion +1 cycle
+      (the stray 1-cycle read response is dropped in DATA_READY,
+      `rsp.ready` low there — no drain FSM).
+    - **Latched stall-flag bank** (cone B): second `Decoder` on the
+      fixed-point `incWord` (LDI-8 header or payload); 7 flags latched
+      with `rID_instr` under the same fire guard; all stall-logic
+      decoder reads are register-sourced; formal equivalence asserts
+      pin flags == live decode whenever `vID`.
+    - **`snapStStall` register-only** (cone C): dropped
+      `&& !io.dataBus.req.fire` — that term pulled the SoC ready-cone
+      (`rBusAddr → isIoAddr → UART-tx mux → req.fire → stallID →
+      instrRsp.fire → CE`) into the ID-register enable path (the seed-6
+      98.98 tail).  ST entry is now blocked for the whole
+      held-snapshot window — a strictly stronger serialization
+      (superset of the unfired-window property; machine-checked in
+      same-cycle and temporal form) — leaving `stallID` register-only.
+      Formal properties are stripped from the generated Verilog (zero
+      `assert` statements in `PipSoc.sv`), so the swept netlist is
+      exactly this tree's hardware.
+    - Makefile: `F4PGA_SEED ?= 1` knob on both PnR rules (nextpnr is
+      deterministic per json+seed → every seed result reproducible).
+    - Bench trade (PipSoc; multi-cycle bit-identical): nop/alu/mem
+      21,042/154,048/40,000 → 22,043/156,049/40,705 cycles
+      (+4.8/+1.3/+1.8% — the two +1-cycle mechanisms above); all three
+      still faster in wall clock at 106.09 than at the old 101.81.
+    - Fmax: **8/8 seeds PASS, 106.09–112.65 MHz** (default seed 106.62;
+      seed6 98.98 → 112.47); `make f4pga-pipsoc` default-seed
+      end-to-end PASS → `f4pga/build/PipSoc.bit` (mid-route 94.89 is
+      irrelevant — the post-route number counts).
+    - Gates: 52/52 both emulators after each fix, coverage clean,
+      formal asserts rewritten (EX-side convert, flag equivalence,
+      snapStStall same-cycle + temporal); full `sbt test` re-run PASS.
 
 ### Verification Results
 
@@ -556,6 +607,11 @@ v3.4 addition (no encoding — platform mechanism, `ISA-3.md` §10.4):
   `$buf` no-BEL); timing **103.83 MHz PASS at 100 MHz** (fixes #21/#22);
   Phase-3 dual-write-port netlist re-measured **101.38 MHz PASS**
   (recovered the snapshot+bypass ~88-90 FAIL regression)
+- [x] `make f4pga-pipsoc` current tree (Phase-4b memory map + Key Fix 29
+  structural timing round): default seed **106.62 MHz PASS** end-to-end
+  through bitstream; seed sweep 8/8 PASS **106.09–112.65 MHz**
+  (`F4PGA_SEED=<n>` to reproduce a specific seed; pre-fix distribution
+  was 83.7–99.1 typical with a deadlocking default seed)
 - [ ] `f4pga_program` needs a Basys3 board connected via USB
 
 ### GCC 15 Compatibility
