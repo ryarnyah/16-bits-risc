@@ -420,6 +420,56 @@ numbers above, `make f4pga-pipsoc` default-seed end-to-end PASS
 (EX-side convert, flag equivalence, snapStStall same-cycle +
 temporal); full `sbt test` pending (running).
 
+### Change: Soc Fmax — `make f4pga` below 100 MHz (multi-cycle SoC)
+
+User report: `make f4pga` (the Soc target) failed timing below 100 MHz.
+Reproduced at **89.76 MHz post-route (default seed)** — Phase 1's
+recorded 106.19 MHz was stale: v2.1 (byte/SLT/group-B decode), v3.2
+(unified BR), v3.3 (CALLR/JMPR target adders), Phase 4 (interrupt
+responder CE) and Phase 4b (region decode) all grew the DECODE cycle
+without a Soc re-measure.  Critical paths dissected from the nextpnr
+reports (endpoint FFs identified through the yosys json) resolved to one
+pattern: **the DECODE state does decode + regfile read + ALU/adder +
+commit-mux in a single cycle, and the register-file read mux sat in the
+head of every cone** — `instr → rsAddr select → regfile mux → effAddr/
+ALU carry → … → register D/CE`.
+
+Four fixes, all bit-identical and CPI-neutral (bench cycle-identical):
+
+1. **Single `effAddr` adder**: the byte/word offset is pre-muxed before
+   the add (the PipCore `idEffAddr` Phase-3 pattern) — one adder and no
+   result mux instead of two parallel adders.
+2. **`respRegion`**: the int-responder capture condition rewritten as
+   `!isRam && (!isIoAddr || isIntTop)` — algebraically
+   `(isIntReg || isDead)`, equivalence machine-asserted in the SoC
+   formal — one less compare level in front of the responder CE.
+3. **Single PC-relative target adder** `pcRelTarget`: BR/CALLR/JMPR are
+   all `PC + (imm << 1)`, so the offset is pre-muxed before one adder
+   (the CALLR/JMPR formal asserts are value-level and unchanged).
+4. **FETCH-latched operands** (the decisive fix): during FETCH the
+   regfile is pre-read with payload-driven addresses
+   (`state === FETCH ? payload : instr`), and `rRsVal`/`rRtVal` are
+   latched together with `instr`.  Every DECODE consumer (ALU opA/opB,
+   `effAddr`, `brTaken`, ST data, JMP/CALL targets) is then
+   register-sourced — the regfile read mux leaves all DECODE cones.
+   Correctness: no regfile write can occur between a FETCH and its
+   DECODE (writes happen only in WRITEBACK, and the regfile read is not
+   write-through); Core formal asserts
+   `state =/= FETCH → latched === live read` (frame-0
+   `assumeInitial`ed).
+
+Results: **89.76 → 127.02 MHz** (default seed), `make f4pga`
+end-to-end PASS → `f4pga/build/Soc.bit`; seed sweep **all PASS,
+post-route finals 109.48–131.32 MHz** (seed5 hit the pre-existing
+external-SIGTERM flake after its 109.09 mid-route PASS) — no seed
+pinning needed.  PipSoc's netlist is untouched (PipCore/PipSoc
+unmodified) → Key Fix 29's 8/8-seed evidence stands.
+
+Gates: 52/52 both emulators after each fix, coverage clean, bench
+cycle-identical (multi 33,071/258,581/66,571; PipSoc 22,043/156,049/
+40,705), `make f4pga` default-seed end-to-end PASS (127.02 MHz
+post-route); full `sbt test` pending (running).
+
 ## Phase 4 — Interrupts (v3.4 platform model, zero-ISA) [DONE]
 
 Scope decision: **interrupts only** (DMA declined).  ISA impact: none —

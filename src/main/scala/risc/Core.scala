@@ -72,6 +72,12 @@ case class Core() extends Component with CoreBusIoComponent {
   private val instr = Reg(Bits(16 bits))
   private val rd = Reg(UInt(3 bits))
   private val aluRes = Reg(Bits(16 bits))
+  // FETCH-latched operands (Soc Fmax round — see the regfile section
+  // below): the register file is pre-read during FETCH and the values are
+  // latched together with `instr`, so every DECODE-cycle consumer is
+  // register-sourced instead of reaching through the regfile read mux.
+  private val rRsVal = Reg(Bits(16 bits)) init (0)
+  private val rRtVal = Reg(Bits(16 bits)) init (0)
 
   // === Sub-components ===
   private val decoder = Decoder()
@@ -101,9 +107,9 @@ case class Core() extends Component with CoreBusIoComponent {
   // === ALU ===
   // Operand B: sign-extended imm (ADDI/XORI), zero-extended imm (group-B
   // immediates), or the Rt register value.
-  alu.io.rsVal := regFile.io.rsVal
+  alu.io.rsVal := rRsVal
   alu.io.opB := decoder.io.isImmEn ? sextVal |
-    (decoder.io.immZext ? zextVal | regFile.io.rtVal)
+    (decoder.io.immZext ? zextVal | rRtVal)
   alu.io.aluFunc := decoder.io.aluFunc
 
   // === Load/store effective address ===
@@ -111,16 +117,31 @@ case class Core() extends Component with CoreBusIoComponent {
   // byte access (LDB/STB, v2.1 §4.6) = Rs + zext(off3).  Odd word addresses
   // are impossible by construction (off*2 is even), so the v2.1 §2.3
   // bit-0-ignored aliasing rule is gone.
-  private val offZext3 = B(0, 13 bits) ## decoder.io.instr(2 downto 0)
+  private val offZext3 = (B(0, 13 bits) ## decoder.io.instr(2 downto 0)).asUInt
   private val offScaled = (sextVal.asUInt << 1).resize(16)
-  private val effAddr = Mux(isByteMem,
-    (regFile.io.rsVal.asUInt + offZext3.asUInt).asBits,
-    (regFile.io.rsVal.asUInt + offScaled).asBits.resized)
+  // ONE adder: the byte/word offset is pre-muxed BEFORE the add — bit-
+  // identical modular addition, the same restructuring PipCore's idEffAddr
+  // got in the Phase-3 round 1.  Two parallel adders + result mux left a
+  // full mux level on the Soc critical path
+  // (instr → decoder → offset → adder → region decode → req.fire →
+  // int-responder CE, 89.76 MHz).
+  private val effAddr = (rRsVal.asUInt +
+    (isByteMem ? offZext3 | offScaled)).resize(16).asBits
 
   // === Register file ===
   // Port addresses via Isa (single source of truth with PipCore/Decoder).
-  private val rsAddr = Isa.rsAddrOf(decoder.io.instr)
-  private val rtAddr = Isa.rtAddrOf(decoder.io.instr)
+  // Soc Fmax round: during FETCH the read addresses come from the
+  // in-flight instruction bytes, and the read values are latched with
+  // `instr` (rRsVal/rRtVal) — every DECODE-cycle consumer is then
+  // register-sourced instead of reaching through the register-file read
+  // mux (the PnR critical cone was
+  // instr → rsAddr → regfile mux → effAddr/ALU → … → register CE).
+  // No regfile write can occur between a FETCH and its DECODE (writes
+  // happen only in WRITEBACK), so the latched operands are exact; the
+  // live read stays driven and is equivalence-checked in formal below.
+  private val rsAddrSrc = Mux(state === CoreState.FETCH, io.instrRsp.payload, instr)
+  private val rsAddr = Isa.rsAddrOf(rsAddrSrc)
+  private val rtAddr = Isa.rtAddrOf(rsAddrSrc)
 
   regFile.io.rsAddr := rsAddr
   regFile.io.rtAddr := rtAddr
@@ -147,27 +168,31 @@ case class Core() extends Component with CoreBusIoComponent {
   DebugReads.attach(busIf, regFile, PC)
   io.dbgRegFile1 := regFile.io.auxVal
 
-  // === Branch target ===
-  // ISA v3.2: BR offset is instr[6:0] (words, ±64), added to the already-
-  // incremented PC.  Same shift pattern as the word-scaled LD/ST offset.
+  // === PC-relative control targets — ONE adder for all three ===
+  // ISA v3.2: BR offset is instr[6:0] (words, ±64); v3.3: CALLR off9 =
+  // instr[8:0], JMPR off12 = instr[11:0].  All three are PC + (imm << 1)
+  // on the already-incremented PC (same shift pattern as the word-scaled
+  // LD/ST offset), so the offset is pre-muxed BEFORE a single adder —
+  // bit-identical modular addition, the same restructuring PipCore's
+  // idEffAddr got.  Three parallel adders + result selection on PC's D
+  // path cost carry levels and placement pressure in the Soc DECODE
+  // cone (Soc PnR critical paths, 89.76 MHz baseline).
   private val brOff7 = decoder.io.instr(6 downto 0).asSInt.resize(16).asBits
   private val brShifted = brOff7(14 downto 0) ## B"0"
-  private val brTarget = (PC.asSInt + brShifted.asSInt).asBits.resized
-
-  // === v3.3 PC-relative control targets ===
-  // CALLR: off9 = instr[8:0]; JMPR: off12 = instr[11:0] (words, same
-  // already-incremented-PC rule as branches; same shift pattern).
   private val callOff9 = decoder.io.instr(8 downto 0).asSInt.resize(16).asBits
   private val callShifted = callOff9(14 downto 0) ## B"0"
   private val jmpOff12 = decoder.io.instr(11 downto 0).asSInt.resize(16).asBits
   private val jmpShifted = jmpOff12(14 downto 0) ## B"0"
+  private val pcRelOff = Mux(decoder.io.isBranch, brShifted,
+    Mux(decoder.io.isCALLR, callShifted, jmpShifted))
+  private val pcRelTarget = (PC.asSInt + pcRelOff.asSInt).asBits.resized
 
   // === Branch condition evaluation (v3.2, shared via Isa) ===
   private val brTaken = decoder.io.isBranch &&
-    Isa.brTaken(regFile.io.rsVal, decoder.io.brCC)
+    Isa.brTaken(rRsVal, decoder.io.brCC)
 
   // === ST data (from rdField via rtAddr override) ===
-  private val stVal = regFile.io.rtVal
+  private val stVal = rRtVal
   // v2.1 §5.6: STB writes R[Rd][7:0] into the addressed byte lane
   // (little-endian: odd address → upper lane).  The SoC masks the other lane.
   private val stData = Mux(effAddr(0),
@@ -230,6 +255,11 @@ case class Core() extends Component with CoreBusIoComponent {
         io.instrRsp.ready := True
         when(io.instrRsp.fire) {
           instr := io.instrRsp.payload
+          // Pre-read the operands of the instruction being fetched (the
+          // read addresses are payload-driven while in FETCH) so DECODE
+          // starts from registers.
+          rRsVal := regFile.io.rsVal
+          rRtVal := regFile.io.rtVal
           PC := PC + 2
           state := CoreState.DECODE
         }
@@ -261,27 +291,27 @@ case class Core() extends Component with CoreBusIoComponent {
         io.dataBus.req.payload.isByte := decoder.io.isSTB
         when(io.dataBus.req.fire) { done() }
       }
-      when(decoder.io.isJMP) { PC := regFile.io.rsVal.asUInt; done() }
+      when(decoder.io.isJMP) { PC := rRsVal.asUInt; done() }
       // v2.1 §5.4: CALL Rlink,Rtarget — Rlink ← PC (already incremented past
       // the CALL at FETCH), then jump to Rtarget (Rt field instr[5:3]).
       when(decoder.io.isCALL) {
         aluRes := PC.asBits
-        PC := regFile.io.rtVal.asUInt
+        PC := rRtVal.asUInt
         state := CoreState.WRITEBACK
       }
       // v3.3: CALLR Rlink,off9 — link write like CALL, PC-relative target.
       when(decoder.io.isCALLR) {
         aluRes := PC.asBits
-        PC := (PC.asSInt + callShifted.asSInt).asBits.resized.asUInt
+        PC := pcRelTarget.asUInt
         state := CoreState.WRITEBACK
       }
       // v3.3: JMPR off12 — PC-relative unconditional jump.
       when(decoder.io.isJMPR) {
-        PC := (PC.asSInt + jmpShifted.asSInt).asBits.resized.asUInt
+        PC := pcRelTarget.asUInt
         done()
       }
       when(decoder.io.isBranch) {
-        when(brTaken) { PC := brTarget.asUInt }
+        when(brTaken) { PC := pcRelTarget.asUInt }
         done()
       }
       // v2.1 §5.4: HALT — terminal state until reset/bus command.
@@ -356,6 +386,8 @@ case class Core() extends Component with CoreBusIoComponent {
     assumeInitial(instr === 0)
     assumeInitial(rd === 0)
     assumeInitial(aluRes === 0)
+    assumeInitial(rRsVal === 0)
+    assumeInitial(rRtVal === 0)
 
     // ── Reset invariants ──
     // After the initial reset (checked only in first cycle, before any writes):
@@ -374,6 +406,16 @@ case class Core() extends Component with CoreBusIoComponent {
     // ISA §1: R0 is always 0 — checked via rsVal when rsAddr=0.
     // (The RegFile component has its own TC-RF-2 assertion for R0.)
     when(regFile.io.rsAddr === 0) { assert(regFile.io.rsVal === 0) }
+
+    /* Soc Fmax move — FETCH-latched operands: in every non-FETCH state
+     * the live register-file read (address = latched-instr fields) equals
+     * the values latched at the FETCH edge.  Holds because no regfile
+     * write can occur between a FETCH and its DECODE (writes happen only
+     * in WRITEBACK, and the read is not write-through). */
+    when(state =/= CoreState.FETCH) {
+      assert(rRsVal === regFile.io.rsVal)
+      assert(rRtVal === regFile.io.rtVal)
+    }
 
     // ── Temporal (past) assertions ──
     // Bus commands (STEP=0x04, RUN=0x05, RESET=0x03) can override FSM state/PC

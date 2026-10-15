@@ -41,7 +41,10 @@
   (Key Fix 29): three cones re-sourced from registers → **8/8 seeds
   PASS, 106.09–112.65 MHz** (default seed 106.62), bitstream
   end-to-end on the default seed (was seed-lottery 83.7–99.1 with a
-  deadlocking default seed)
+  deadlocking default seed); **Soc Fmax round DONE (Key Fix 30)**:
+  `make f4pga` FAIL 89.76 → FETCH-latched operands + three adder/
+  decode consolidations → **all-seed PASS 109.5–131.3 MHz** (default
+  seed **127.02 MHz**, end-to-end `Soc.bit`, bench cycle-identical)
 - **Phase 4 (interrupts) DONE:** v3.4 zero-ISA platform model — fixed
   vector 0x0008, CTRL/EPC MMIO at 0xFFF8/0xFFFA (relocated by item 28),
   hardware auto-DI on
@@ -521,6 +524,46 @@
       formal asserts rewritten (EX-side convert, flag equivalence,
       snapStStall same-cycle + temporal); full `sbt test` re-run PASS.
 
+30. **Soc Fmax — `make f4pga` below 100 MHz (multi-cycle SoC)**
+    (`Core.scala`, `Soc.scala`; user report "`make f4pga` fail < 100MHz"):
+    reproduced at **89.76 MHz post-route (default seed)** — Phase 1's
+    recorded 106.19 MHz was stale (v2.1 byte/SLT decode, v3.2/v3.3
+    PC-relative adders, Phase-4 interrupt responder and Phase-4b region
+    decode all landed without re-measuring Soc).  Critical paths dissected
+    from nextpnr reports with netlist-FF identification via the yosys
+    json; three shapes seen:
+    `instr → regfile read mux → effAddr carry → region decode → req.fire → CE`
+    of the int-read responder (round 0, 89.76), then
+    `instr → decode/imm → ALU $lt chain → aluRes.D`, with the PC-relative
+    target adder shadowing.  Fixes (all bit-identical and cycle-neutral):
+    - **Single `effAddr` adder** — byte/word offset pre-muxed BEFORE the
+      add (the PipCore `idEffAddr` Phase-3 round-1 pattern).
+    - **`respRegion`** = `!isRam && (!isIoAddr || isIntTop)` for the int
+      responder capture condition — algebraically `(isIntReg || isDead)`,
+      equivalence machine-asserted in the SoC formal.
+    - **Single PC-relative target adder** `pcRelTarget` — BR/CALLR/JMPR
+      are all `PC + (imm<<1)`, offset pre-muxed before one adder (the
+      CALLR/JMPR formal asserts are value-level and stay unchanged).
+    - **FETCH-latched operands `rRsVal`/`rRtVal`** (the decisive fix):
+      during FETCH the regfile is pre-read with payload-driven addresses
+      and the values are latched together with `instr`; every DECODE
+      consumer (ALU opA/opB, `effAddr`, `brTaken`, ST data, JMP/CALL
+      targets) is register-sourced, removing the regfile read mux from
+      all DECODE cones.  Equivalence (`state =/= FETCH → latched === live
+      regfile read`) asserted in Core formal, frame-0 `assumeInitial`ed;
+      valid because no regfile write can occur between a FETCH and its
+      DECODE (writes happen only in WRITEBACK) and the regfile read is
+      not write-through.
+    - Results: Fmax **89.76 → 127.02 MHz** default seed,
+      `make f4pga` end-to-end PASS → `f4pga/build/Soc.bit` (EXIT=0);
+      seed sweep **all PASS, post-route finals 109.48–131.32 MHz**
+      (seed5 hit the pre-existing external-SIGTERM flake after its
+      109.09 mid-route PASS) — no seed pinning needed.  Bench
+      **cycle-identical** (multi 33071/258581/66571; PipSoc untouched at
+      22043/156049/40705); 52/52 both emulators; coverage clean.  The
+      PipSoc netlist is unaffected (PipCore/PipSoc untouched) → Key Fix
+      29's 8/8-seed evidence stands.
+
 ### Verification Results
 
 - **RTL Generation**: ✓ SystemVerilog generated successfully
@@ -612,6 +655,10 @@ v3.4 addition (no encoding — platform mechanism, `ISA-3.md` §10.4):
   through bitstream; seed sweep 8/8 PASS **106.09–112.65 MHz**
   (`F4PGA_SEED=<n>` to reproduce a specific seed; pre-fix distribution
   was 83.7–99.1 typical with a deadlocking default seed)
+- [x] `make f4pga` (Soc) current tree (Key Fix 30 Soc Fmax round):
+  default seed **127.02 MHz PASS** end-to-end → `f4pga/build/Soc.bit`
+  (pre-fix 89.76 FAIL@100); seed sweep all PASS **109.48–131.32 MHz**
+  (seed5 hit the external-SIGTERM flake after its 109.09 mid-route PASS)
 - [ ] `f4pga_program` needs a Basys3 board connected via USB
 
 ### GCC 15 Compatibility

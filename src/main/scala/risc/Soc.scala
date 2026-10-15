@@ -77,6 +77,14 @@ class Soc(hexPath: String = "") extends Component {
   private val isIntCtrl = isIntTop && !core.io.dataBus.req.addr(1)
   private val isEpc     = isIntTop && core.io.dataBus.req.addr(1)
   private val isIntReg  = isIntCtrl || isEpc
+  // Region answered by the registered responder on reads: the interrupt
+  // registers plus the unmapped hole.  `respRegion` is algebraically
+  // identical to (isIntReg || isDead) — equivalence machine-asserted in
+  // the formal below — but stacks one less compare level in front of the
+  // capture condition (Soc critical path: instr → decoder → offset →
+  // effAddr → region decode → req.fire → responder CE, 89.76 MHz).
+  private val respRegionRef = isIntReg || isDead
+  private val respRegion    = !isRam && (!isIoAddr || isIntTop)
   private val imask = Reg(Bool()) init False
   private val swIrq = Reg(Bool()) init False
   private val epcReg = Reg(Bits(16 bits)) init 0
@@ -94,7 +102,7 @@ class Soc(hexPath: String = "") extends Component {
   }
   // Unmapped-hole reads share the responder and return 0 (reads are
   // deterministic for every address pattern — design goal 2).
-  when(core.io.dataBus.req.fire && (isIntReg || isDead) &&
+  when(core.io.dataBus.req.fire && respRegion &&
     !core.io.dataBus.req.wr) {
     intRspVld := True
     intRdData := Mux(isEpc, epcReg,
@@ -222,6 +230,9 @@ class Soc(hexPath: String = "") extends Component {
     assert(isIoAddr === (core.io.dataBus.req.addr(15 downto 8) === 0xFF))
     assert(isRam === (core.io.dataBus.req.addr(15 downto 13) === 0))
     assert(!(isIoAddr && isRam))
+    /* The responder capture region uses the restructured one-level form
+     * (timing fix on the Soc critical path); semantics unchanged. */
+    assert(respRegion === respRegionRef)
 
     // ── Data RAM ──
 
