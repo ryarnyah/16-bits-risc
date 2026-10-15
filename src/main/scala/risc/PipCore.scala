@@ -213,7 +213,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
   // — functionally identical (rsp.valid can only assert in those states),
   // but the fire term fed a combinational ready/valid cross-dependency
   // that the F4PGA Yosys build collapsed into a hollow netlist cell
-  // (no-BEL $buf with z inputs; see PLAN.md).
+  // (no-BEL $buf with z inputs; see AGENTS.md Key Fix 21).
   io.dataBus.rsp.ready := ldPending || snapPending
 
   // Forwarding from WB stage (used by both ID address and EX ALU forwarding).
@@ -1101,7 +1101,7 @@ case class PipCore() extends Component with CoreBusIoComponent {
     }
 
     // ======================================================================
-    // PC progression — ISA.md §4.3
+    // PC progression — ISA-3.md §7.1 (the PC_next rule)
     // ======================================================================
     when(pastValid() && resetn) {
       when(past(vID) && !past(exBrTaken) && !past(stallIF) && !past(irqTake)) {

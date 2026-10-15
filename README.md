@@ -2,9 +2,9 @@
 
 16-bit RISC processor in SpinalHDL with two core implementations: a multi-cycle FSM core and a 4-stage pipelined core.
 
-Current ISA: **v3** — normative spec in [`ISA-3.md`](ISA-3.md) (v2.1 frozen in [`ISA-2.1.md`](ISA-2.1.md); v3 change
-tracker in [`ISA-3.0.md`](ISA-3.0.md); bus protocol in [`INSTRUCTIONS.md`](INSTRUCTIONS.md); history in
-[`PLAN.md`](PLAN.md) / [`AGENTS.md`](AGENTS.md)).
+Current ISA: **v3** — [`ISA-3.md`](ISA-3.md) is the single normative spec (superseded ISA revisions were removed
+from the repository); bus protocol in [`INSTRUCTIONS.md`](INSTRUCTIONS.md); history and decisions in
+[`AGENTS.md`](AGENTS.md).
 
 ## Cores
 

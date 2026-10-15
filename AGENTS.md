@@ -19,7 +19,8 @@
 
 ### Design Decisions
 
-- **Execution order (PLAN.md):** ISA v3 breaking changes → maintainability → speed
+- **Execution order:** ISA v3 breaking changes → maintainability → speed
+  (rationale folded under "Phase Rationale & Deferred Work" below)
 - **ISA v3.2 (unified BR Z/NZ/MI/PL, ±64w):** DONE — 49/49, `sbt test`
   35/35, exact-inverse far form (3 sites: collatz/bench_alu)
 - **Phase 1 (ISA v3) CLOSED:** V3.1 word-LD/ST, V3.2 BR, V3.3 CALLR/JMPR;
@@ -35,7 +36,8 @@
   RegFile dual write ports DONE (correctness, Key Fix 25); cc.py MOV
   handoff DONE (Key Fix 26: nop/alu/mem −19.5/−11.0/−3.5% multi-cycle,
   −19.2/−11.5/−3.6% PipSoc); Fmax
-  106.19 → ~88-90 FAIL@100 (critical-path analysis in PLAN.md, bypass
+  106.19 → ~88-90 FAIL@100 (critical-path analysis folded under "Phase
+  Rationale & Deferred Work", bypass
   word compare = the delta) **recovered to 101.38 MHz PASS** by the
   dual-port netlist; structural **100 MHz assurance round DONE**
   (Key Fix 29): three cones re-sourced from registers → **8/8 seeds
@@ -61,9 +63,104 @@
 - **Formal:** SpinalFormalConfig with BMC/prove/cover at depth 50
 - **Emulator:** C++ via Verilator, reads program from hex file
 
+### Phase Rationale & Deferred Work (folded from the retired `PLAN.md`)
+
+Phase order is deliberate: an ISA break invalidates binaries, tests, formal
+and docs, so refactoring the decoder it touches and speed numbers taken
+across it are both wasted — breaking changes first, structural cleanup
+second, speed last, never interleaved.  Compat policy: every v3 step
+recompiles from source; `examples/*.asm|*.hex` are generated artifacts
+(refresh via `make test-programs-all`) — never hand-edit them.
+
+**Phase 1 decisions**
+
+- `LDIH` (single-word constant) CLOSED AS IMPOSSIBLE: group F leaves 9
+  bits after `op+Rd`, `LDI8` spends 1 (marker) + 8 → any sibling marker
+  pair leaves `payload[5:0]` = 6 bits, so a 2-word byte-granular high
+  half is unrepresentable; 3+-word syntheses lose to `LDI` on size *and*
+  cycles, and a preserving `LDIH` would add an EX read-merge forwarding
+  path (net complexity gain, not deletion).  `LDI` stays; revisit only if
+  the format grows a byte.
+- Clean ALU opcode map CLOSED AS WONTFIX: `func = opc<4 ? opc>>1 : opc-2`
+  is ~2 mux levels in a non-critical block (`rEX_aluFunc` is latched;
+  decode never sat on a critical path).  Renumbering re-breaks every
+  binary, encoding, test and formal TC for zero functional gain.
+  Revisit only if decode lands on a critical path (then: ADDI/XORI →
+  group B, `func = op[2:0]`).
+- Byte-offset widening (V3.5) DEFERRED: `cc.py` emits no `LDB`/`STB`
+  (the C subset has no byte type), `off3` range is unpressured —
+  profiler evidence required to reopen.
+- Dual immediate forms (`ADDI` 3-op vs group-B 2-op) are deliberate:
+  unifying saves ~10 assembler lines at the price of breaking every
+  group-B user.
+
+**Phase 2 decisions**
+
+- Pipeline bundles DEFERRED (`InstrType`/`LdPhase` enums still moved to
+  `Types.scala`): flush is already single-point (`rEX_type := EMPTY`,
+  `vID/vWB := False`); the real fragilities are ordering + feedback
+  protocols + the LD FSM's direct `rEX_type` write.  A ~150-site rename
+  risks init-semantics change for readability only — revisit only if
+  stages are added or removed.
+- `LoadStoreUnit` CLOSED as no-go: the LD FSM is inseparable from the
+  single-Stream dataBus master (EX issue), WB writeback and 5
+  forwarding/stall consumers — a component boundary would be wider than
+  the logic and would split a formally-pinned protocol.
+- Inline formal CONFIRMED as the correct pattern: the `*FormalTest`
+  runners only invoke `GenerationFlags.formal` blocks that must live
+  inside components (they reference private pipeline signals;
+  SpinalHDL has no out-of-component access).
+- Explicit `next*` hold-default wires with ordered overrides match the
+  old elaboration order — equivalence verified bit-identical by BMC(30),
+  not by inspection.
+
+**Phase 3 analyses**
+
+- bench nop artifact (measurement, no RTL): `bench.py` originally
+  binary-searched "first step where R1 == expected", but `bench_nop`
+  reloads `0x3E8` into R1 every iteration → the predicate oscillated and
+  converged to a mid-loop transition (recorded multi 18,667 / PipSoc
+  21,014 were artifacts).  Fixed to "whole register file == final state"
+  (monotone in the `_exit: JMP R5` spin): truth multi 41,080 / PipSoc
+  26,048.  alu/mem never collided (their expected values only occur at
+  the end, R1-only was within ≤46 cycles) — all recorded alu/mem numbers
+  and deltas stand; the old "pipeline LOSES on nop" note was the same
+  artifact (pipeline actually WINS ~1.6×).
+- Snapshot+bypass Fmax regression (106.19 → ~87-90 FAIL) recorded with
+  reason per the exit gate: critical cone `rID_rsAddr → regfile/
+  forwarding → idEffAddr CARRY4 → bypass word compare → CE/next-state`,
+  routing-dominated (~8 ns of ~11.3 ns); the bypass word compare (2 LUT
+  levels + routing after the adder) is exactly the delta vs Phase 1.
+  Not fixable without an IPC loss: the bypass must decide atomically at
+  ID→EX transfer (the tracker can change in that cycle via an ST fire —
+  stStall's one-cycle shadow makes the pre-edge read commit), a
+  fire-time decision saves nothing (the RAM responds in the SNAPSHOT
+  cycle already — skipping that cycle *is* the bypass's value), and
+  narrowing the compare to the 12-bit word index does not reduce LUT
+  levels (both 2) while lengthening the carry.  Tool sweeps were
+  exhausted first (Key Fix 24) → ~88-90 was this netlist's ceiling,
+  broken structurally by Key Fixes 25/29.
+- Deferred IPC levers (profile with `bench.py` first): 1-deep store
+  buffer (ST to a full UART stops stalling IF/ID/EX), narrow EX→ID
+  forward to pre-compute consumers only (`idEffAddr/idBrTaken/
+  idJmpTarget`), 1-bit BTB for loop back-edges, `Core.scala` demoted to
+  debug/golden model.
+- Known limitation (sync data RAM, WAW inversion): with a 1-cycle-late
+  writeback an older LD can clobber a *younger* register write (port 1
+  = ldWb wins same-address conflicts).  The concurrent LD/WB
+  write-collision variant (ALU/CALL write lost, e.g. `ADDI R7` frame
+  updates) is FIXED by the dual-port RegFile (Key Fix 25).  Supporting
+  BRAM data RAM still needs in-order writeback (stall ID→EX while a
+  load is outstanding, or route load data through the WB port).
+
+**Interrupt versioning note:** the *proposed* v3.4 (clean ALU opcode
+map) was closed wontfix in Phase 1 and never shipped; "v3.4" is first
+used by the Phase-4 platform interrupt model (`ISA-3.md` §10.4).
+
 ### Key Fixes Applied
 
-1. **ISA fixes** (in ISA.md):
+1. **ISA fixes** (v2.0-era spec, since removed — invariants now in
+   `ISA-3.md` §5.2/§12.1):
    - SRL decode: `is_alu = ~op[3] | (op == 4'b1000)` includes opcode 0x8
    - LD/ST offset range: –32 to +31 (6-bit signed immediate)
 
@@ -180,7 +277,8 @@
     - Verified: all 41 C tests pass on both emulators, bench_15.c (15-element
       array, offset -34 for sum) correctly returns 0x69.
 
-17. **ISA v2.1 implemented** (spec: `ISA-2.1.md`; RTL + assembler + tests):
+17. **ISA v2.1 implemented** (spec since removed — encodings now in
+    `ISA-3.md` §5; RTL + assembler + tests):
     - RTL: `Decoder` banks A/B/F (SLT/SLTU/SRA via funct3, group-B immediates
       ANDI/ORI/SLLI/SRLI/SRAI cf≥011, CALL cf=001, HALT cf=010, LDI8/LDB/STB),
       4-bit `aluFunc`, `CoreState.HALT`, PipCore `InstrType.CALL` + `halted`
@@ -347,7 +445,8 @@
       4096 words (pre-existing `make f4pga` Soc abort on short hex).
     - Tool sweeps: seeds 79-91, `--placer sa` broken, `--placer-budgets`
       83.27, timingweight variants 87.6-88.6 — structural ceiling
-      ~88-90 MHz; full analysis + recorded IPC trade in PLAN.md.
+      ~88-90 MHz; critical-cone analysis + IPC trade folded under
+      "Phase Rationale & Deferred Work".
 
 25. **PipCore RegFile write-port collision — dual write ports** (found
     by the Phase-3 profiling/cc.py work; `RegFile.scala`, `PipCore.scala`,
@@ -395,7 +494,7 @@
 
 27. **Phase 4 interrupts — v3.4 platform model, zero-ISA** (`Core.scala`,
     `PipCore.scala`, `Soc.scala`, `PipSoc.scala`, `ISA-3.md` §10.4,
-    `PLAN.md`, `examples/irq_test.asm`, `run_tests.py`):
+    `examples/irq_test.asm`, `run_tests.py`):
     - Scope: **interrupts only** (DMA declined).  No encoding changes —
       entry/return/masking are platform mechanisms on existing
       instructions; v3.3 binaries are unaffected (IMASK resets to 0 and
@@ -449,7 +548,7 @@
 
 28. **Phase 4b — memory map: full RAM, I/O + interrupt at the top**
     (user request; `Soc.scala`, `PipSoc.scala`, `cc.py`, UART examples,
-    `irq_test.asm`, ISA-3.md §10.1/§10.4/§16, PLAN.md):
+    `irq_test.asm`, ISA-3.md §10.1/§10.4/§16):
     - Map (disjoint rows, ISA-3 §10.1): RAM `0x0000..0x1FFF` complete
       (the old 4-byte I/O shadow at the top is gone); unmapped hole
       `0x2000..0xFEFF` (reads return 0 via the registered responder,
@@ -487,8 +586,7 @@
     seed deadlock-class).  Every failing timing path dissected to the
     same pattern — freshly-decoded instruction fields or the SoC's
     request-ready compute combinationally feeding handshake/CE paths.
-    Three cones re-sourced from registers (full write-up in PLAN.md
-    Phase 3, "structural 100 MHz assurance"):
+    Three cones re-sourced from registers:
     - **EX-side store-to-load bypass** (cone A): unconditional snapshot
       at ID→EX; `exBypassTake` converts the held snapshot to
       DATA_READY one cycle later from registers (`rEX_effAddr`,
@@ -615,8 +713,9 @@
 | 0xE | JMPR | `callr_test.asm` (v3.3 PC-relative jump) |
 | 0xF | LDI | everywhere (load addresses, constants) |
 
-v2.1 additions (encoded in padding/`must-be-zero` fields, reserved encodings
-still NOP — see `ISA-2.1.md` §11):
+v2.1 additions (encoded in padding/`must-be-zero` fields; carried into
+v3 unchanged — encodings in `ISA-3.md` §5.3–5.5, reserved encodings
+still NOP):
 
 | Mnemonic | Encoding home | Test |
 |----------|---------------|------|

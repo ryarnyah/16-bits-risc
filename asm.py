@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """16-bit RISC assembler: asm -> hex word list (ISA v3.3).
 
-v3.1: LD/ST offsets are in words (-32..+31, see ISA-3.0.md).
+v3.1: LD/ST offsets are in words (-32..+31, see ISA-3.md §6.3).
 v3.2: unified branch BR cc, Rs, target (cc in Z/NZ/MI/PL, offset +-64
   words); far targets use exact-inverse + jump.
 v3.3: PC-relative CALLR Rlink,target (+-256w) and JMPR target (+-2048w).

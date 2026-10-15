@@ -143,7 +143,8 @@ private val core = PipCore()
   // (SNAPSHOT state), so the WB-stage writeback stays in program order —
   // a sync (1-cycle-late) response would let later instructions retire
   // before the load (WAW inversion) and collide with the regfile write
-  // port (dropped ADDI R7 frame updates; see PLAN.md known limitation).
+  // port (dropped ADDI R7 frame updates; see AGENTS.md "Known
+  // limitation (sync data RAM, WAW inversion)").
   private val ramRdData = dataRam.readAsync(dataWordAddr)
   private val ramRspVld = core.io.dataBus.req.fire && isRam && !core.io.dataBus.req.wr
 

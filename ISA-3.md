@@ -5,8 +5,9 @@
    Version:        3.3 (final)
    Category:       Standards Track (internal)
    Status:         APPROVED — implemented and verified
-   Obsoletes:      ISA-2.1.md (frozen, historical), ISA.md (v2.0, obsolete)
-   Process:        PLAN.md (Phase 1 — breaking ISA changes)
+   Obsoletes:      all earlier ISA revisions (v2.0, v2.1, v3 drafts —
+                   removed from the repository)
+   Process:        AGENTS.md (project history and decisions)
    Date:           October 2026
 ```
 
@@ -16,10 +17,10 @@ This document is the complete, self-contained specification of the version 3
 instruction set architecture (ISA) of the 16-bit RISC microcontroller core.
 It is a standards-track internal document: every requirement stated here is
 enforced by the implementation (`src/main/scala/risc/`), the toolchain
-(`asm.py`, `cc.py`), formal verification, and the regression suite. Where
-this document and older specifications (`ISA.md`, `ISA-2.1.md`,
-`ISA-3.0.md`) disagree, **this document takes precedence**; the older files
-are frozen historical records and MUST NOT be consulted for v3 behaviour.
+(`asm.py`, `cc.py`), formal verification, and the regression suite.
+Earlier specifications (v2.0, v2.1 and the intermediate v3 drafts) have
+been **removed from the repository** — this memo is the only ISA document;
+any historical copy found elsewhere MUST NOT be consulted for v3 behaviour.
 
 Version 3 is a **breaking** revision: v2.x binaries do not execute with v3
 semantics and MUST be rebuilt from source. Distribution of this memo is
@@ -94,8 +95,8 @@ source-level contract of the assembler. Micro-architectural matters
 
 ### 2.2 Relationship to Previous Versions
 
-- v2.0 (`ISA.md`): the original 16-instruction set. Obsolete.
-- v2.1 (`ISA-2.1.md`): a binary-compatible superset of v2.0 that filled
+- v2.0: the original 16-instruction set. Obsolete (document removed).
+- v2.1: a binary-compatible superset of v2.0 that filled
   padding fields with 13 new instructions (`SLT`, `SLTU`, `SRA`, `CALL`,
   `HALT`, `ANDI`, `ORI`, `SLLI`, `SRLI`, `SRAI`, `LDI8`, `LDB`, `STB`)
   and documented `NOP`, alignment, endianness, reset, and the
@@ -867,10 +868,10 @@ There are no protocol parameter registries.
 ## 16. Change History
 
 ```
-v2.0   Original 16-instruction set (ISA.md).
+v2.0   Original 16-instruction set.
 v2.1   Padding-field expansion: +13 instructions, documented NOP,
-       alignment/endianness/reset/reserved rules (ISA-2.1.md, frozen).
-v3.0   Scaffold for breaking changes (PLAN.md Phase 1).
+       alignment/endianness/reset/reserved rules.
+v3.0   Scaffold for breaking changes.
 v3.1   LD/ST offsets word-scaled (all 64 encodings distinct).
 v3.2   Unified branch BR cc,Rs,off7 (Z/NZ/MI/PL); BEQ/BNE/BLT removed.
 v3.3   PC-relative CALLR Rlink,off9 and JMPR off12 on opcodes 0xD/0xE.
@@ -1086,4 +1087,5 @@ patterns), MUST default to `NOP` until implemented, and MUST be added to
 *This document defines the complete version 3 instruction set: 29
 instructions, deterministic legalisation of all unassigned encodings, an
 assembler contract with exact relaxation forms, and a full accounting of
-the 16-bit encoding space. It supersedes ISA.md and ISA-2.1.md.*
+the 16-bit encoding space. It supersedes all earlier ISA revisions
+(documents removed).*
