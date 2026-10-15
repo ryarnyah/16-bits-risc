@@ -43,8 +43,9 @@
   end-to-end on the default seed (was seed-lottery 83.7–99.1 with a
   deadlocking default seed); **Soc Fmax round DONE (Key Fix 30)**:
   `make f4pga` FAIL 89.76 → FETCH-latched operands + three adder/
-  decode consolidations → **all-seed PASS 109.5–131.3 MHz** (default
-  seed **127.02 MHz**, end-to-end `Soc.bit`, bench cycle-identical)
+  decode consolidations → **sweep finals 109.5–131.3 MHz, 7/8 PASS**
+  (default seed **127.02 MHz**, end-to-end `Soc.bit`, bench
+  cycle-identical; seed5 = external SIGTERM flake mid-routing)
 - **Phase 4 (interrupts) DONE:** v3.4 zero-ISA platform model — fixed
   vector 0x0008, CTRL/EPC MMIO at 0xFFF8/0xFFFA (relocated by item 28),
   hardware auto-DI on
@@ -556,9 +557,10 @@
       not write-through.
     - Results: Fmax **89.76 → 127.02 MHz** default seed,
       `make f4pga` end-to-end PASS → `f4pga/build/Soc.bit` (EXIT=0);
-      seed sweep **all PASS, post-route finals 109.48–131.32 MHz**
-      (seed5 hit the pre-existing external-SIGTERM flake after its
-      109.09 mid-route PASS) — no seed pinning needed.  Bench
+      seed sweep **7/8 post-route finals PASS, 109.48–131.32 MHz**
+      (seed5 was externally SIGTERM'd mid-routing after its 109.09
+      mid-route PASS — the pre-existing flake) — no seed pinning
+      needed.  Bench
       **cycle-identical** (multi 33071/258581/66571; PipSoc untouched at
       22043/156049/40705); 52/52 both emulators; coverage clean.  The
       PipSoc netlist is unaffected (PipCore/PipSoc untouched) → Key Fix
@@ -608,9 +610,9 @@
 | 0x9 | LD | everywhere (load args, locals, stack) |
 | 0xA | ST | everywhere (store args, locals, stack) |
 | 0xB | JMP | `fib.c`, `dec.c` (call/return via R5) |
-| 0xC | BEQ | `beq_test.c`, `__mul16` loops |
-| 0xD | BNE | `bne_test.c` (`while (i != 0)`) |
-| 0xE | BLT | `fib.c`, `all_alu_test.c`, `collatz.c` |
+| 0xC | BR (Z/NZ/MI/PL, off7; BEQ/BNE/BLT/… pseudos) | `beq_test.c`, `bne_test.c`, `__mul16`, `fib.c`, `collatz.c` (v3.2 unified branch) |
+| 0xD | CALLR | `callr_test.asm` (v3.3 PC-relative call) |
+| 0xE | JMPR | `callr_test.asm` (v3.3 PC-relative jump) |
 | 0xF | LDI | everywhere (load addresses, constants) |
 
 v2.1 additions (encoded in padding/`must-be-zero` fields, reserved encodings
@@ -657,8 +659,9 @@ v3.4 addition (no encoding — platform mechanism, `ISA-3.md` §10.4):
   was 83.7–99.1 typical with a deadlocking default seed)
 - [x] `make f4pga` (Soc) current tree (Key Fix 30 Soc Fmax round):
   default seed **127.02 MHz PASS** end-to-end → `f4pga/build/Soc.bit`
-  (pre-fix 89.76 FAIL@100); seed sweep all PASS **109.48–131.32 MHz**
-  (seed5 hit the external-SIGTERM flake after its 109.09 mid-route PASS)
+  (pre-fix 89.76 FAIL@100); seed sweep 7/8 finals PASS
+  **109.48–131.32 MHz** (seed5: external-SIGTERM flake mid-routing after
+  its 109.09 mid-route PASS)
 - [ ] `f4pga_program` needs a Basys3 board connected via USB
 
 ### GCC 15 Compatibility

@@ -1,8 +1,11 @@
 # 16-bit RISC Microcontroller ISA Specification — Version 2.1
 
-**Status: IMPLEMENTED (v2.1 final)** — supersedes `ISA.md` (v2.0). Implemented
-in RTL (`Core`, `PipCore`), `asm.py`, `run_tests.py`; verified by formal BMC,
-41 C tests + 7 ISA-level asm tests on both SoCs.
+**Status: FROZEN (v2.1 final)** — superseded by `ISA-3.md` (v3) for the
+current tree; itself supersedes `ISA.md` (v2.0).  The v2.1 features remain
+in RTL (`Core`, `PipCore`), `asm.py`, `run_tests.py`; verified by formal BMC
+and the program suites (41 C tests + 11 ISA-level asm tests on both SoCs).
+Note: v3 changed LD/ST offset scaling (word-scaled, v3.1) and replaced the
+`BEQ`/`BNE`/`BLT` opcodes with the unified `BR` (v3.2) — see `ISA-3.md`.
 **Instruction width:** 16 bits (fixed); sole exception: `LDI` (2-word immediate)
 **Data width:** 16 bits · **Address space:** 16-bit byte-addressable (64 KB)
 **Registers:** 8 GPRs `R0`–`R7`, 16 bits; `R0` hardwired to 0

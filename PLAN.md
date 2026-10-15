@@ -459,10 +459,10 @@ Four fixes, all bit-identical and CPI-neutral (bench cycle-identical):
    `assumeInitial`ed).
 
 Results: **89.76 → 127.02 MHz** (default seed), `make f4pga`
-end-to-end PASS → `f4pga/build/Soc.bit`; seed sweep **all PASS,
-post-route finals 109.48–131.32 MHz** (seed5 hit the pre-existing
-external-SIGTERM flake after its 109.09 mid-route PASS) — no seed
-pinning needed.  PipSoc's netlist is untouched (PipCore/PipSoc
+end-to-end PASS → `f4pga/build/Soc.bit`; seed sweep **7/8 post-route
+finals PASS, 109.48–131.32 MHz** (seed5 was externally SIGTERM'd
+mid-routing after its 109.09 mid-route PASS — the pre-existing flake)
+— no seed pinning needed.  PipSoc's netlist is untouched (PipCore/PipSoc
 unmodified) → Key Fix 29's 8/8-seed evidence stands.
 
 Gates: 52/52 both emulators after each fix, coverage clean, bench

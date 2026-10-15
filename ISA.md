@@ -1,5 +1,9 @@
 # 16-bit RISC Microcontroller ISA Specification
 
+> **SUPERSEDED** — this is the original v2.0 document, kept for history.
+> Current specs: [`ISA-3.md`](ISA-3.md) (v3, normative) and
+> [`ISA-2.1.md`](ISA-2.1.md) (v2.1, frozen; supersedes this file).
+
 **Version 2.0 – Optimized for Verilog Implementation**  
 **Instruction width:** 16 bits (fixed)  
 **Data width:** 16 bits  
